@@ -1,0 +1,64 @@
+{
+  "algo_name": "bc",
+
+  "experiment": {
+    "name": "transport_bc_baseline",
+    "validate": false,
+    "logging": {
+      "terminal_output_to_txt": true,
+      "log_tb": true
+    },
+    "save": {
+      "enabled": true,
+      "every_n_epochs": 20,
+      "on_best_rollout_success_rate": false
+    },
+    "rollout": {
+      "enabled": false
+    }
+  },
+
+  "train": {
+    "data": "datasets/transport/ph/low_dim_v141.hdf5",
+    "output_dir": "checkpoints/bc_baseline/",
+    "num_data_workers": 0,
+    "hdf5_cache_mode": "all",
+    "hdf5_use_swmr": true,
+    "hdf5_normalize_obs": false,
+    "batch_size": 256,
+    "num_epochs": 100,
+    "seq_length": 1
+  },
+
+  "algo": {
+    "optim_params": {
+      "policy": {
+        "optimizer_type": "adam",
+        "learning_rate": {
+          "initial": 0.0001
+        }
+      }
+    },
+    "loss": {
+      "l2_weight": 1.0
+    },
+    "actor_layer_dims": [256, 256],
+
+    "rnn": {
+      "enabled": false
+    }
+  },
+
+  "observation": {
+    "modalities": {
+      "obs": {
+        "low_dim": [
+          "robot0_eef_pos",
+          "robot0_eef_quat",
+          "robot0_gripper_qpos",
+          "object"
+        ]
+      }
+    }
+  }
+}

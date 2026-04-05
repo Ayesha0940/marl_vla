@@ -1,0 +1,48 @@
+# Dataset files (large HDF5 files)
+datasets/
+
+# Model checkpoints and saved models
+checkpoints/
+models/
+
+# Logs and results
+logs/
+results/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Environment files
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Videos (if generated during training/evaluation)
+videos/
