@@ -8,7 +8,7 @@ models/
 # Logs and results
 logs/
 # results/  # Removed to include results in git
-results/**/*.mp4  # Ignore video files in results
+results/*/*.mp4  # Ignore video files in results subdirectories
 
 # Python cache
 __pycache__/
