@@ -62,8 +62,8 @@ def parse_arguments():
         help='Training batch size (default: 256)'
     )
     parser.add_argument(
-        '--num_epochs', type=int, default=200,
-        help='Number of training epochs (default: 200)'
+        '--num_epochs', type=int, default=100,
+        help='Number of training epochs (default: 100)'
     )
     parser.add_argument(
         '--lr', type=float, default=1e-4,
@@ -111,7 +111,6 @@ def main():
 
     assert Ds == state_dim,  f"state_dim mismatch: {Ds} vs {state_dim}"
     assert Da == action_dim, f"action_dim mismatch: {Da} vs {action_dim}"
-    assert H  == 1,          f"Expected H=1, got H={H}"
 
     print(f"✅ Dataset loaded")
     print(f"   task:       {task}")

@@ -246,7 +246,14 @@ def run_single_rollout(policy, env, noise_std, method, filt, horizon,
 
     # Import diffusion utils lazily — only pay the import cost if needed
     if method == "diffusion":
-        from diffusion.model import flatten_obs, diffusion_denoise_action
+        from diffusion.model import (
+            flatten_obs,
+            diffusion_denoise_action,
+            diffusion_denoise_action_window,
+        )
+        # Choose inference function based on H saved in loaded model
+        from diffusion.model import DIFFUSION_CONSTS
+        use_window = DIFFUSION_CONSTS.get("H", 1) > 1
 
     for step in range(horizon):
         # Get clean action from policy
@@ -265,11 +272,20 @@ def run_single_rollout(policy, env, noise_std, method, filt, horizon,
         if method == "diffusion":
             # Flatten obs to state vector for conditioning
             state_vec = flatten_obs(obs, obs_keys)
-            action    = diffusion_denoise_action(
-                noisy_action_vec = noisy_action,
-                state_vec        = state_vec,
-                t_start          = t_start,
-            )
+            if use_window:
+                # H>1: denoise full window, execute only step 0
+                action = diffusion_denoise_action_window(
+                    noisy_action_vec = noisy_action,
+                    state_vec        = state_vec,
+                    t_start          = t_start,
+                )
+            else:
+                # H=1: single step denoising
+                action = diffusion_denoise_action(
+                    noisy_action_vec = noisy_action,
+                    state_vec        = state_vec,
+                    t_start          = t_start,
+                )
 
         elif filt is not None:
             # Manual filters: kalman, ema, median

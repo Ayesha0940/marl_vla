@@ -208,6 +208,65 @@ def get_diffusion_obs_keys():
 # =========================
 
 @torch.no_grad()
+def diffusion_denoise_action_window(noisy_action_vec, state_vec, t_start=40):
+    """
+    Denoise using a sliding window (H>1). Denoises H consecutive actions
+    jointly, returns only the first action for execution.
+
+    The noisy action fills position 0 of the window.
+    Positions 1..H-1 are initialised to zero — the model learns to
+    fill them in coherently during reverse diffusion, enforcing
+    temporal consistency across the window.
+
+    Args:
+        noisy_action_vec: np.array [Da]  — current noisy action
+        state_vec:        np.array [Ds]  — flattened obs at window start
+        t_start:          int            — reverse diffusion start step
+
+    Returns:
+        clean_action: np.array [Da]  — denoised action for current step only
+    """
+    model = DIFFUSION_MODEL
+    C     = DIFFUSION_CONSTS
+
+    H          = C["H"]
+    alphas     = C["alphas"]
+    alphas_bar = C["alphas_bar"]
+    Da         = noisy_action_vec.shape[0]
+
+    # Normalize noisy action
+    a = torch.from_numpy(noisy_action_vec).float()
+    a = (a - C["act_mean"][0, 0]) / C["act_std"][0, 0]
+
+    # Build window: noisy action at position 0, zeros elsewhere [1, H, Da]
+    # x       = torch.zeros((1, H, Da))
+    # x[0, 0] = a
+    
+    x = a.unsqueeze(0).unsqueeze(0).repeat(1, H, 1)
+    cond = torch.from_numpy(state_vec).float().unsqueeze(0)  # [1, Ds]
+
+    # Reverse diffusion
+    for t in reversed(range(t_start + 1)):
+        t_tensor = torch.tensor([t])
+        eps_pred = model(x, t_tensor, cond)
+
+        alpha     = alphas[t]
+        alpha_bar = alphas_bar[t]
+
+        x0_hat = (x - torch.sqrt(1 - alpha_bar) * eps_pred) / torch.sqrt(alpha_bar)
+
+        if t > 0:
+            noise = torch.randn_like(x)
+            x     = torch.sqrt(alpha) * x0_hat + torch.sqrt(1 - alpha) * noise
+        else:
+            x = x0_hat
+
+    # Unnormalize and return only position 0 — current step action
+    clean = x[0, 0] * C["act_std"][0, 0] + C["act_mean"][0, 0]
+    return clean.numpy()
+
+
+@torch.no_grad()
 def diffusion_denoise_action(noisy_action_vec, state_vec, t_start=40):
     """
     Denoise a single action vector using reverse diffusion.

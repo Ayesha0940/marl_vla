@@ -4,6 +4,7 @@ from .model import (
     q_sample,
     load_diffusion_model,
     diffusion_denoise_action,
+    diffusion_denoise_action_window,
     get_task_dims,
     flatten_obs,
     get_diffusion_obs_keys,
