@@ -219,54 +219,58 @@ def get_action_dimension(env, policy):
 # =========================
 # SINGLE ROLLOUT EVALUATION
 # =========================
+from collections import deque
+
+POLICY_OBS_KEYS = [
+    'robot0_eef_pos', 'robot0_eef_quat',
+    'robot0_gripper_qpos', 'robot0_joint_pos', 'object'
+]
+CONTEXT_LENGTH = 10
+
 def run_single_rollout(policy, env, noise_std, filt, horizon):
-    """
-    Run a single episode with noisy actions and optional filtering.
-    
-    Args:
-        policy: Agent policy
-        env: Environment instance
-        noise_std: Standard deviation of action noise
-        filt: Filter instance (or None for no filtering)
-        horizon: Maximum steps per episode
-        
-    Returns:
-        tuple: (episode_reward, success)
-    """
+    import numpy as np
+    import torch
+
     obs = env.reset()
     policy.start_episode()
     ep_reward = 0.0
     success = False
 
+    # Initialise history buffer with zeros
+    obs_filtered = {k: obs[k] for k in POLICY_OBS_KEYS}
+    history = {k: deque([np.zeros_like(v)] * CONTEXT_LENGTH, maxlen=CONTEXT_LENGTH)
+               for k, v in obs_filtered.items()}
+
     for step in range(horizon):
-        # Get action from policy
-        action = policy(obs)
+        obs_filtered = {k: obs[k] for k in POLICY_OBS_KEYS}
 
-        # Add noise if specified
+        # Update history
+        for k, v in obs_filtered.items():
+            history[k].append(v)
+
+        # Build context tensor [1, T, dim]
+        obs_context = {
+            k: torch.FloatTensor(np.stack(list(history[k]))).unsqueeze(0).cuda()
+            for k in POLICY_OBS_KEYS
+        }
+
+        with torch.no_grad():
+            ac = policy.policy.nets['policy'](
+                obs_context, actions=None, goal_dict=None
+            )[:, -1, :].cpu().numpy()[0]
+
         if noise_std > 0:
-            noise = np.random.normal(0, noise_std, size=action.shape)
-            noisy_action = action + noise
-        else:
-            noisy_action = action
-
-        # Apply filter if specified
+            ac = ac + np.random.normal(0, noise_std, size=ac.shape)
         if filt is not None:
-            action = filt.update(noisy_action)
-        else:
-            action = noisy_action
+            ac = filt.update(ac)
+        ac = np.clip(ac, -1.0, 1.0)
 
-        # Clip action to valid range
-        action = np.clip(action, -1.0, 1.0)
-
-        # Take environment step
-        obs, reward, done, _ = env.step(action)
+        obs, reward, done, _ = env.step(ac)
         ep_reward += reward
 
-        # Check for task success
         if env.is_success()["task"]:
             success = True
             break
-
         if done:
             break
 

@@ -456,7 +456,7 @@ def main():
             methods.append(f"diffusion[t={t}]")
 
     # Noise levels
-    noise_levels = [0.1, 0.2, 0.5, 0.75]
+    noise_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
     # -------------------------
     # Load BC-RNN policy
