@@ -85,7 +85,6 @@ dependencies:
       - cycler==0.12.1
       - cython==0.29.37
       - diffusers==0.37.1
-      - dlimp==0.0.1
       - dm-tree==0.1.10
       - draccus==0.8.0
       - egl-probe==1.0.2
@@ -158,7 +157,6 @@ dependencies:
       - oauthlib==3.3.1
       - opencv-python==4.11.0.86
       - openexr==3.4.8
-      - openvla==0.0.3
       - opt-einsum==3.4.0
       - pandas==2.3.3
       - peft==0.18.1
@@ -213,9 +211,6 @@ dependencies:
       - tokenizers==0.19.1
       - toml==0.10.2
       - tomli==2.4.1
-      - torch==2.12.0.dev20260331+cu128
-      - torchaudio==2.11.0.dev20260331+cu128
-      - torchvision==0.27.0.dev20260331+cu128
       - tqdm==4.67.3
       - transformers==4.40.1
       - trimesh==4.11.5

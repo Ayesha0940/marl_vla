@@ -1,23 +1,35 @@
 """
-Train a DDPM-style diffusion model on (obs, action) pairs collected
+Train a DDPM-style diffusion model on (cond, action) pairs collected
 from a trained robomimic policy.
 
 Task-agnostic: works for Lift, Can, Square, or any robomimic task.
-All dims are read from the .npz file produced by collect_diffusion_data.py.
+All dims and cond_mode are read from the .npz file produced by collect_diffusion_data.py.
 
 The saved checkpoint is self-describing — it contains everything needed
-to load and run the model at eval time (dims, obs_keys, normalization stats).
+to load and run the model at eval time (dims, cond_mode, obs_keys, normalization stats).
+
+Conditioning modes (set during collection, auto-read here):
+    state:        cond_dim = Ds
+    vision:       cond_dim = 512
+    state+vision: cond_dim = Ds + 512
 
 Examples:
-    python train_diffusion.py \\
-        --data_path diffusion_data/lift_diffusion_data.npz \\
-        --output_path diffusion_models/lift_diffusion_model.pt \\
-        --task lift
+    # State conditioning (original)
+    python -m diffusion.train_diffusion \\
+        --data_path diffusion_data/square_diffusion_data_H1_state.npz \\
+        --task square
 
-    python train_diffusion.py \\
-        --data_path diffusion_data/can_diffusion_data.npz \\
-        --output_path diffusion_models/can_diffusion_model.pt \\
-        --task can
+    # Vision conditioning
+    python -m diffusion.train_diffusion \\
+        --data_path diffusion_data/square_diffusion_data_H1_vision.npz \\
+        --output_path diffusion_models/square_diffusion_model_vision.pt \\
+        --task square
+
+    # State + Vision
+    python -m diffusion.train_diffusion \\
+        --data_path diffusion_data/square_diffusion_data_H1_state_plus_vision.npz \\
+        --output_path diffusion_models/square_diffusion_model_statevision.pt \\
+        --task square
 """
 
 import os
@@ -43,11 +55,11 @@ def parse_arguments():
     parser.add_argument(
         '--output_path', type=str, default=None,
         help='Path to save trained model .pt file. '
-             'Defaults to diffusion_models/<task>_diffusion_model.pt'
+             'Defaults to diffusion_models/<task>_diffusion_model_<cond_mode>.pt'
     )
     parser.add_argument(
         '--task', type=str, default=None,
-        help='Task name for bookkeeping. Auto-read from .npz if not provided.'
+        help='Task name. Auto-read from .npz if not provided.'
     )
     parser.add_argument(
         '--diffusion_steps', type=int, default=100,
@@ -83,11 +95,10 @@ def parse_arguments():
 def main():
     args = parse_arguments()
 
-    # Seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # Force CPU to avoid CUBLAS issues — same decision as MPE testbed
+    # Force CPU — matches MPE testbed decision, avoids CUBLAS issues
     device = torch.device("cpu")
     print(f"🖥  Device: {device} (forced, matches MPE testbed)")
 
@@ -97,42 +108,47 @@ def main():
     print(f"\n📂 Loading data from: {args.data_path}")
     data = np.load(args.data_path, allow_pickle=True)
 
-    states  = data["states"]   # [N, 1, Ds]
-    actions = data["actions"]  # [N, 1, Da]
+    conds   = data["conds"]    # [N, H, Dc]
+    actions = data["actions"]  # [N, H, Da]
 
-    N, H, Ds = states.shape
-    _,  _, Da = actions.shape
+    N,  H,  Dc = conds.shape
+    _,  _,  Da = actions.shape
 
-    # Read metadata saved during collection
+    # Read metadata — all saved by collect_diffusion_data.py
     obs_keys   = list(data["obs_keys"])
     state_dim  = int(data["state_dim"])
+    cond_dim   = int(data["cond_dim"])
     action_dim = int(data["action_dim"])
+    cond_mode  = str(data["cond_mode"])
     task       = str(data["task"]) if args.task is None else args.task
 
-    assert Ds == state_dim,  f"state_dim mismatch: {Ds} vs {state_dim}"
+    assert Dc == cond_dim,   f"cond_dim mismatch: {Dc} vs {cond_dim}"
     assert Da == action_dim, f"action_dim mismatch: {Da} vs {action_dim}"
 
     print(f"✅ Dataset loaded")
     print(f"   task:       {task}")
-    print(f"   N:          {N} timesteps")
-    print(f"   state_dim:  {Ds}")
+    print(f"   cond_mode:  {cond_mode}")
+    print(f"   N:          {N} windows")
+    print(f"   H:          {H}")
+    print(f"   cond_dim:   {Dc}")
     print(f"   action_dim: {Da}")
     print(f"   obs_keys:   {obs_keys}")
 
-    # Default output path
+    # Default output path encodes cond_mode so files don't collide
     if args.output_path is None:
         os.makedirs("diffusion_models", exist_ok=True)
-        args.output_path = f"diffusion_models/{task}_diffusion_model.pt"
+        cond_suffix = cond_mode.replace('+', '_plus_')
+        args.output_path = f"diffusion_models/{task}_diffusion_model_{cond_suffix}.pt"
 
     # -------------------------
     # Build tensors
     # -------------------------
-    states_t  = torch.from_numpy(states).float()   # [N, 1, Ds]
-    actions_t = torch.from_numpy(actions).float()  # [N, 1, Da]
+    conds_t   = torch.from_numpy(conds).float()    # [N, H, Dc]
+    actions_t = torch.from_numpy(actions).float()  # [N, H, Da]
 
     # Normalize actions — same approach as MPE testbed
-    act_mean = actions_t.mean(dim=(0, 1), keepdim=True)  # [1, 1, Da]
-    act_std  = actions_t.std(dim=(0, 1),  keepdim=True) + 1e-6
+    act_mean  = actions_t.mean(dim=(0, 1), keepdim=True)  # [1, 1, Da]
+    act_std   = actions_t.std(dim=(0, 1),  keepdim=True) + 1e-6
     actions_t = (actions_t - act_mean) / act_std
 
     print(f"\n📊 Action normalization")
@@ -145,14 +161,14 @@ def main():
     from diffusion.model import TrajectoryDiffusion, make_beta_schedule, q_sample
 
     model = TrajectoryDiffusion(
-        horizon    = H,             # 1
-        action_dim = Da,            # 7 for lift
-        cond_dim   = Ds,            # 19 for lift
+        horizon    = H,
+        action_dim = Da,
+        cond_dim   = Dc,   # automatically correct for all 3 modes
         hidden_dim = args.hidden_dim,
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"\n🧠 Model parameters: {total_params:,}")
+    print(f"\n🧠 Model | cond_mode={cond_mode} | cond_dim={Dc} | params={total_params:,}")
 
     # -------------------------
     # Diffusion schedule
@@ -182,7 +198,7 @@ def main():
 
         # Shuffle
         perm      = torch.randperm(N)
-        states_t  = states_t[perm]
+        conds_t   = conds_t[perm]
         actions_t = actions_t[perm]
 
         epoch_loss = 0.0
@@ -191,22 +207,17 @@ def main():
             start = b * args.batch_size
             end   = min(N, (b + 1) * args.batch_size)
 
-            x0   = actions_t[start:end].to(device)           # [B, 1, Da]
-            cond = states_t[start:end, 0, :].to(device)      # [B, Ds] — condition on obs
+            x0   = actions_t[start:end].to(device)        # [B, H, Da]
+            cond = conds_t[start:end, 0, :].to(device)    # [B, Dc] — condition on first step
 
             B = x0.shape[0]
 
-            # Sample random diffusion timestep
             t   = torch.randint(0, args.diffusion_steps, (B,), device=device)
             eps = torch.randn_like(x0)
 
-            # Forward diffusion
-            x_t = q_sample(x0, t, eps, alphas_bar)
-
-            # Predict noise
+            x_t      = q_sample(x0, t, eps, alphas_bar)
             eps_pred = model(x_t, t, cond)
 
-            # MSE loss on noise prediction — same as MPE testbed
             loss = F.mse_loss(eps_pred, eps)
 
             optimizer.zero_grad()
@@ -220,14 +231,12 @@ def main():
         if epoch_loss < best_loss:
             best_loss = epoch_loss
 
-        # Log every 10 epochs
         if (epoch + 1) % 10 == 0 or epoch == 0:
             print(f"  Epoch {epoch+1:4d}/{args.num_epochs} | "
-                  f"loss: {epoch_loss:.6f} | "
-                  f"best: {best_loss:.6f}")
+                  f"loss: {epoch_loss:.6f} | best: {best_loss:.6f}")
 
     # -------------------------
-    # Save checkpoint
+    # Save checkpoint — self-describing
     # -------------------------
     os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
 
@@ -235,19 +244,21 @@ def main():
         {
             # Model
             "model_state_dict": model.state_dict(),
-            # Architecture — needed to reconstruct model at eval time
+            # Architecture
             "horizon":          H,
             "action_dim":       Da,
-            "cond_dim":         Ds,
+            "cond_dim":         Dc,
             "hidden_dim":       args.hidden_dim,
             "diffusion_steps":  args.diffusion_steps,
-            # Normalization — needed to denoise at eval time
+            # Normalization
             "act_mean":         act_mean,
             "act_std":          act_std,
-            # Task metadata — makes checkpoint self-describing
+            # Task + conditioning metadata
             "obs_keys":         obs_keys,
+            "cond_mode":        cond_mode,   # saved so eval scripts know what to build
+            "state_dim":        state_dim,
             "task":             task,
-            # Training info — for reproducibility
+            # Training info
             "n_samples":        N,
             "num_epochs":       args.num_epochs,
             "final_loss":       epoch_loss,
@@ -256,7 +267,9 @@ def main():
         args.output_path,
     )
 
-    print(f"\n💾 Saved model to: {args.output_path}")
+    print(f"\n💾 Saved to: {args.output_path}")
+    print(f"   cond_mode:  {cond_mode}")
+    print(f"   cond_dim:   {Dc}")
     print(f"   final_loss: {epoch_loss:.6f}")
     print(f"   best_loss:  {best_loss:.6f}")
 

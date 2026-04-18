@@ -103,3 +103,96 @@ This document compares the single-agent diffusion implementation in the `diffusi
 ## Practical note
 
 The main difference is not the denoiser network architecture itself, but the surrounding data representation and integration with the control policy.
+
+---
+
+## Vision Conditioning Update
+
+### What changed
+
+The single-agent diffusion pipeline was extended to support three conditioning modes via a `--cond_mode` flag. The `TrajectoryDiffusion` model architecture is unchanged — only the conditioning vector fed into it changes.
+
+### New conditioning modes
+
+| Mode | `cond_dim` | Source | Use case |
+|---|---|---|---|
+| `state` | `Ds` (e.g. 26 for Square) | `flatten_obs()` | Original behaviour |
+| `vision` | `512` | ResNet-18 agentview image | Vision-only ablation |
+| `state+vision` | `Ds + 512` | concat(state, vision) | Full conditioning |
+
+### New components in `model.py`
+
+`ResNet18Encoder` — frozen pretrained ResNet-18. Takes `[B, 3, H, W]` float in `[0,1]`, returns `[B, 512]`. Weights are frozen — no training needed. ImageNet pretrained features transfer well to manipulation tasks.
+
+`encode_image(img_uint8)` — encodes a single `[H, W, 3]` uint8 camera frame to a `[512]` numpy vector. Handles uint8→float conversion and ImageNet normalisation internally.
+
+`build_cond_vec(obs_dict, obs_keys, cond_mode)` — single entry point for all three modes. Replaces the previous `flatten_obs()` call in all eval and collection scripts.
+
+`get_cond_dim(cond_mode, state_dim)` — returns the correct `cond_dim` integer to pass to `TrajectoryDiffusion`.
+
+`get_diffusion_cond_mode()` — returns the `cond_mode` stored in a loaded checkpoint so eval scripts can reconstruct conditioning automatically.
+
+`get_encoder()` — global singleton `ResNet18Encoder`, created on first call and reused across all subsequent calls.
+
+### Changes in `collect_diffusion_data.py`
+
+`--cond_mode` argument added. When `vision` or `state+vision`, env is created with `use_camera_obs=True`, `has_offscreen_renderer=True`, `camera_names=['agentview']` at `84x84`. Output `.npz` now saves `conds [N, H, Dc]` instead of `states [N, H, Ds]`, and metadata includes `cond_mode` and `cond_dim`.
+
+### Changes in `train_diffusion.py`
+
+`cond_mode` and `cond_dim` read directly from `.npz` — no manual flag needed. `cond_mode` saved into checkpoint for eval scripts to read back automatically.
+
+### What did NOT change
+
+- `TrajectoryDiffusion` forward pass
+- `make_beta_schedule`, `q_sample`
+- `diffusion_denoise_action`, `diffusion_denoise_action_window` — second argument renamed `state_vec` → `cond_vec`, behaviour identical
+- Training loop, normalisation, checkpoint format structure
+
+### Eval script update (one line change)
+
+Replace:
+```python
+state_vec = flatten_obs(obs, obs_keys)
+denoised  = diffusion_denoise_action(noisy_action, state_vec, t_start)
+```
+With:
+```python
+cond_vec = build_cond_vec(obs, obs_keys, cond_mode)
+denoised = diffusion_denoise_action(noisy_action, cond_vec, t_start)
+```
+Where `cond_mode = get_diffusion_cond_mode()` after loading the model.
+
+### Collection commands
+
+```bash
+export CUDA_VISIBLE_DEVICES=0
+cd ~/marl_vla
+CKPT=checkpoints/bc_rnn_lift/bc_rnn_lift/*/models/model_epoch_600.pth
+
+python -m diffusion.collect_diffusion_data --checkpoint $CKPT --task lift --cond_mode state        --n_episodes 200
+python -m diffusion.collect_diffusion_data --checkpoint $CKPT --task lift --cond_mode vision       --n_episodes 200
+python -m diffusion.collect_diffusion_data --checkpoint $CKPT --task lift --cond_mode state+vision --n_episodes 200
+```
+
+### Training commands
+
+```bash
+python -m diffusion.train_diffusion --data_path diffusion_data/lift_diffusion_data_H1_state.npz             --task lift
+python -m diffusion.train_diffusion --data_path diffusion_data/lift_diffusion_data_H1_vision.npz            --task lift
+python -m diffusion.train_diffusion --data_path diffusion_data/lift_diffusion_data_H1_state_plus_vision.npz --task lift
+```
+
+### Paper ablation table this enables
+
+```
+Table: Robustness Recovery under Action Noise
+──────────────────────────────────────────────────────────────────
+Denoiser conditioning    t_start=20   t_start=40   t_start=60
+──────────────────────────────────────────────────────────────────
+None (noisy baseline)       x%           x%           x%
+State only                  x%           x%           x%
+Vision only                 x%           x%           x%
+State + Vision              x%           x%           x%
+──────────────────────────────────────────────────────────────────
+```

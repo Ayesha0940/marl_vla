@@ -1,38 +1,39 @@
 """
-Collect clean (obs, action) trajectories from a trained robomimic policy
+Collect clean (obs, cond) trajectories from a trained robomimic policy
 for diffusion model training.
 
 Task-agnostic: works for Lift, Can, Square, or any robomimic task.
 Dims are auto-detected from the checkpoint via shape_metadata.
 
+Conditioning modes (--cond_mode):
+    state:        cond = flatten_obs()           [Ds]   — original behaviour
+    vision:       cond = encode_image()          [512]  — ResNet-18 features
+    state+vision: cond = concat(state, vision)   [Ds+512]
+
 Supports H=1 (single step) and H>1 (sliding window) via --window_size.
 
 Output .npz file:
-    H=1:  states [N, 1, Ds], actions [N, 1, Da]  — one sample per step
-    H>1:  states [N, H, Ds], actions [N, H, Da]  — one sample per window
-          where states[:,0,:] is the conditioning obs (window start)
-          and actions[:,0:H,:] are H consecutive clean actions
-
-Windows are built per-episode with stride=1 (fully overlapping).
-Windows never cross episode boundaries.
+    conds   [N, H, Dc]  — conditioning vectors (Dc depends on cond_mode)
+    actions [N, H, Da]  — clean actions
+    cond_mode, cond_dim, action_dim, obs_keys, task, window_size saved as metadata
 
 Examples:
-    # H=1 (original behaviour)
+    # State conditioning (original)
     python -m diffusion.collect_diffusion_data \\
-        --checkpoint checkpoints/bc_rnn_lift/.../model_epoch_600.pth \\
-        --task lift --n_episodes 200
+        --checkpoint checkpoints/bc_rnn_square/.../model_epoch_2000.pth \\
+        --task square --n_episodes 200 --cond_mode state
 
-    # H=5 sliding window
+    # Vision conditioning
     python -m diffusion.collect_diffusion_data \\
-        --checkpoint checkpoints/bc_rnn_lift/.../model_epoch_600.pth \\
-        --task lift --n_episodes 200 --window_size 5 \\
-        --output_path diffusion_data/lift_diffusion_data_H5.npz
+        --checkpoint checkpoints/bc_rnn_square/.../model_epoch_2000.pth \\
+        --task square --n_episodes 200 --cond_mode vision \\
+        --output_path diffusion_data/square_diffusion_data_H1_vision.npz
 
-    # H=10 (matches BC-RNN sequence length)
+    # State + Vision
     python -m diffusion.collect_diffusion_data \\
-        --checkpoint checkpoints/bc_rnn_lift/.../model_epoch_600.pth \\
-        --task lift --n_episodes 200 --window_size 10 \\
-        --output_path diffusion_data/lift_diffusion_data_H10.npz
+        --checkpoint checkpoints/bc_rnn_square/.../model_epoch_2000.pth \\
+        --task square --n_episodes 200 --cond_mode state+vision \\
+        --output_path diffusion_data/square_diffusion_data_H1_statevision.npz
 """
 
 import os
@@ -51,6 +52,7 @@ def setup_mujoco():
         os.path.expanduser('~/.mujoco/mujoco210/bin'),
         '/usr/lib/x86_64-linux-gnu',
         '/usr/lib/x86_64-linux-gnu/nvidia',
+        '/usr/lib/nvidia',
     ]
     current   = os.environ.get('LD_LIBRARY_PATH', '')
     new_paths = [p for p in paths if os.path.exists(p)]
@@ -75,6 +77,11 @@ def parse_arguments():
         help='Task name for bookkeeping (e.g. lift, can, square)'
     )
     parser.add_argument(
+        '--cond_mode', type=str, default='state',
+        choices=['state', 'vision', 'state+vision'],
+        help='Conditioning mode: state | vision | state+vision (default: state)'
+    )
+    parser.add_argument(
         '--n_episodes', type=int, default=200,
         help='Number of successful episodes to collect (default: 200)'
     )
@@ -84,15 +91,12 @@ def parse_arguments():
     )
     parser.add_argument(
         '--window_size', type=int, default=1,
-        help='Sliding window size H. '
-             'H=1: one sample per step (original). '
-             'H>1: overlapping windows of H consecutive steps. '
-             'Default: 1'
+        help='Sliding window size H (default: 1)'
     )
     parser.add_argument(
         '--output_path', type=str, default=None,
         help='Path to save .npz file. '
-             'Defaults to diffusion_data/<task>_diffusion_data_H<window_size>.npz'
+             'Defaults to diffusion_data/<task>_diffusion_data_H<H>_<cond_mode>.npz'
     )
     parser.add_argument(
         '--only_successful', action='store_true', default=True,
@@ -109,14 +113,15 @@ def parse_arguments():
 # POLICY AND ENV LOADING
 # =========================
 
-def load_policy_and_env(checkpoint_path):
+def load_policy_and_env(checkpoint_path, cond_mode):
     """
     Load robomimic policy and environment from checkpoint.
+    Enables camera obs when cond_mode requires vision.
 
     Returns:
-        policy:    callable, takes obs dict, returns action np.array [Da]
-        env:       robomimic env
-        ckpt_dict: raw checkpoint dict (contains shape_metadata)
+        policy:    robomimic RolloutPolicy
+        env:       robomimic EnvRobosuite
+        ckpt_dict: raw checkpoint dict
     """
     import torch
     import robomimic.utils.file_utils as FileUtils
@@ -133,11 +138,22 @@ def load_policy_and_env(checkpoint_path):
     print("✅ Policy loaded")
 
     env_meta = ckpt_dict["env_metadata"]
+
+    # Enable camera obs when vision conditioning is needed
+    needs_vision = cond_mode in ('vision', 'state+vision')
+    if needs_vision:
+        env_meta['env_kwargs']['camera_names']          = ['agentview']
+        env_meta['env_kwargs']['camera_heights']        = 84
+        env_meta['env_kwargs']['camera_widths']         = 84
+        env_meta['env_kwargs']['use_camera_obs']        = True
+        env_meta['env_kwargs']['has_offscreen_renderer'] = True
+        print("📷 Camera obs enabled (agentview 84x84)")
+
     env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta,
-        render=False,
-        render_offscreen=False,
-        use_image_obs=False,
+        env_meta       = env_meta,
+        render         = False,
+        render_offscreen = needs_vision,
+        use_image_obs  = needs_vision,
     )
     print("✅ Environment created")
 
@@ -148,36 +164,39 @@ def load_policy_and_env(checkpoint_path):
 # SINGLE EPISODE COLLECTION
 # =========================
 
-def collect_episode(policy, env, obs_keys, horizon):
+def collect_episode(policy, env, obs_keys, cond_mode, horizon):
     """
-    Roll out the policy for one episode, collecting (obs, action) at every step.
-    No windowing here — returns raw per-step arrays.
+    Roll out the policy for one episode, collecting (cond, action) at every step.
 
     Args:
-        policy:   robomimic policy
-        env:      robomimic env
-        obs_keys: list of obs keys to flatten (from get_task_dims)
-        horizon:  max steps per episode
+        policy:    robomimic policy
+        env:       robomimic env
+        obs_keys:  list of state obs keys (from get_task_dims)
+        cond_mode: 'state' | 'vision' | 'state+vision'
+        horizon:   max steps per episode
 
     Returns:
-        ep_states:  np.array [T, state_dim] — flattened obs at each step
-        ep_actions: np.array [T, action_dim] — clean actions at each step
+        ep_conds:   np.array [T, Dc] — conditioning vectors at each step
+        ep_actions: np.array [T, Da] — clean actions at each step
         success:    bool
     """
-    from diffusion.model import flatten_obs
+    from diffusion.model import build_cond_vec
 
     obs = env.reset()
     policy.start_episode()
 
-    ep_states  = []
+    ep_conds   = []
     ep_actions = []
     success    = False
 
     for step in range(horizon):
-        state_vec = flatten_obs(obs, obs_keys)
-        action    = policy(obs)
+        # Build conditioning vector — handles all three modes
+        cond_vec = build_cond_vec(obs, obs_keys, cond_mode)
 
-        ep_states.append(state_vec)
+        # Get clean action from policy
+        action = policy(ob=obs, goal=None)
+
+        ep_conds.append(cond_vec)
         ep_actions.append(action.copy())
 
         obs, reward, done, _ = env.step(action)
@@ -189,52 +208,41 @@ def collect_episode(policy, env, obs_keys, horizon):
         if done:
             break
 
-    ep_states  = np.array(ep_states,  dtype=np.float32)  # [T, Ds]
+    ep_conds   = np.array(ep_conds,   dtype=np.float32)  # [T, Dc]
     ep_actions = np.array(ep_actions, dtype=np.float32)  # [T, Da]
 
-    return ep_states, ep_actions, success
+    return ep_conds, ep_actions, success
 
 
 # =========================
 # WINDOW BUILDER
 # =========================
 
-def build_windows(ep_states, ep_actions, window_size):
+def build_windows(ep_conds, ep_actions, window_size):
     """
-    Convert a single episode's per-step arrays into overlapping windows.
+    Convert a single episode into overlapping windows.
     Windows never cross episode boundaries.
 
-    For each valid start index i (0 <= i <= T-H):
-        state window:  ep_states[i : i+H]   — H obs vectors
-        action window: ep_actions[i : i+H]  — H consecutive actions
-
-    The conditioning signal at inference is states[0] (window start obs).
-
-    Args:
-        ep_states:   np.array [T, Ds]
-        ep_actions:  np.array [T, Da]
-        window_size: int H
-
     Returns:
-        windows_states:  np.array [N_windows, H, Ds]  or None if T < H
-        windows_actions: np.array [N_windows, H, Da]  or None if T < H
+        windows_conds:   np.array [N_windows, H, Dc] or None
+        windows_actions: np.array [N_windows, H, Da] or None
     """
-    T = ep_states.shape[0]
+    T = ep_conds.shape[0]
 
     if T < window_size:
         return None, None
 
-    windows_states  = []
+    windows_conds   = []
     windows_actions = []
 
     for i in range(T - window_size + 1):
-        windows_states.append(ep_states[i : i + window_size])    # [H, Ds]
-        windows_actions.append(ep_actions[i : i + window_size])  # [H, Da]
+        windows_conds.append(ep_conds[i : i + window_size])
+        windows_actions.append(ep_actions[i : i + window_size])
 
-    windows_states  = np.array(windows_states,  dtype=np.float32)  # [N_w, H, Ds]
-    windows_actions = np.array(windows_actions, dtype=np.float32)  # [N_w, H, Da]
+    windows_conds   = np.array(windows_conds,   dtype=np.float32)
+    windows_actions = np.array(windows_actions, dtype=np.float32)
 
-    return windows_states, windows_actions
+    return windows_conds, windows_actions
 
 
 # =========================
@@ -247,23 +255,31 @@ def main():
     np.random.seed(args.seed)
     setup_mujoco()
 
-    H = args.window_size
+    H         = args.window_size
+    cond_mode = args.cond_mode
 
-    # Default output path includes H so files don't collide across window sizes
+    # Default output path encodes H and cond_mode so files don't collide
     if args.output_path is None:
         os.makedirs("diffusion_data", exist_ok=True)
-        args.output_path = f"diffusion_data/{args.task}_diffusion_data_H{H}.npz"
+        cond_suffix = cond_mode.replace('+', '_plus_')
+        args.output_path = (
+            f"diffusion_data/{args.task}_diffusion_data"
+            f"_H{H}_{cond_suffix}.npz"
+        )
 
     # Load policy and environment
-    policy, env, ckpt_dict = load_policy_and_env(args.checkpoint)
+    policy, env, ckpt_dict = load_policy_and_env(args.checkpoint, cond_mode)
 
-    # Auto-detect dims from checkpoint — works for any robomimic task
-    from diffusion.model import get_task_dims
+    # Auto-detect dims from checkpoint
+    from diffusion.model import get_task_dims, get_cond_dim
     obs_keys, state_dim, action_dim = get_task_dims(ckpt_dict)
+    cond_dim = get_cond_dim(cond_mode, state_dim)
 
     print(f"\n📐 Task:            {args.task}")
+    print(f"📐 cond_mode:       {cond_mode}")
     print(f"📐 obs_keys:        {obs_keys}")
     print(f"📐 state_dim:       {state_dim}")
+    print(f"📐 cond_dim:        {cond_dim}")
     print(f"📐 action_dim:      {action_dim}")
     print(f"📐 window_size H:   {H}")
     print(f"📐 Episodes:        {args.n_episodes}")
@@ -271,48 +287,41 @@ def main():
     print(f"📐 Only successful: {args.only_successful}")
     print(f"📐 Output:          {args.output_path}\n")
 
-    all_states  = []  # each entry: [N_windows, H, Ds]
-    all_actions = []  # each entry: [N_windows, H, Da]
+    all_conds   = []
+    all_actions = []
 
     n_collected   = 0
     n_success     = 0
     n_failed      = 0
     n_too_short   = 0
     total_windows = 0
-    ep            = 0
 
     while n_collected < args.n_episodes:
-        ep += 1
 
-        ep_states, ep_actions, success = collect_episode(
-            policy, env, obs_keys, args.horizon
+        ep_conds, ep_actions, success = collect_episode(
+            policy, env, obs_keys, cond_mode, args.horizon
         )
 
-        # Skip failed episodes if requested
         if args.only_successful and not success:
             n_failed += 1
             continue
 
-        # Build windows for this episode
+        # Build windows
         if H == 1:
-            # H=1: each step is its own window
-            T           = ep_states.shape[0]
-            win_states  = ep_states.reshape(T, 1, state_dim)
+            T           = ep_conds.shape[0]
+            win_conds   = ep_conds.reshape(T, 1, cond_dim)
             win_actions = ep_actions.reshape(T, 1, action_dim)
         else:
-            # H>1: overlapping sliding windows, stride=1
-            win_states, win_actions = build_windows(ep_states, ep_actions, H)
-
-            if win_states is None:
-                # Episode shorter than window size — skip
+            win_conds, win_actions = build_windows(ep_conds, ep_actions, H)
+            if win_conds is None:
                 n_too_short += 1
                 continue
 
-        all_states.append(win_states)
+        all_conds.append(win_conds)
         all_actions.append(win_actions)
 
         n_collected   += 1
-        total_windows += win_states.shape[0]
+        total_windows += win_conds.shape[0]
 
         if success:
             n_success += 1
@@ -320,31 +329,32 @@ def main():
         if n_collected % 20 == 0 or n_collected == args.n_episodes:
             print(f"  Collected {n_collected:4d}/{args.n_episodes} episodes | "
                   f"success={n_success} | failed={n_failed} | "
-                  f"too_short={n_too_short} | "
-                  f"windows_so_far={total_windows}")
+                  f"too_short={n_too_short} | windows={total_windows}")
 
-    # Concatenate across all episodes: [N_total_windows, H, dim]
-    states  = np.concatenate(all_states,  axis=0)  # [N, H, Ds]
+    # Concatenate
+    conds   = np.concatenate(all_conds,   axis=0)  # [N, H, Dc]
     actions = np.concatenate(all_actions, axis=0)  # [N, H, Da]
 
-    N, H_check, _ = states.shape
-    assert H_check == H, f"Window size mismatch: {H_check} vs {H}"
+    N, H_check, Dc = conds.shape
+    assert H_check == H,   f"Window size mismatch: {H_check} vs {H}"
+    assert Dc == cond_dim, f"cond_dim mismatch: {Dc} vs {cond_dim}"
 
     print(f"\n✅ Collection complete")
-    print(f"   states:          {states.shape}  [N, H, Ds]")
+    print(f"   conds:           {conds.shape}   [N, H, Dc]")
     print(f"   actions:         {actions.shape}  [N, H, Da]")
     print(f"   Total windows:   {N}")
     print(f"   Avg windows/ep:  {N / n_collected:.1f}")
 
-    # Save — window_size saved explicitly so train script reads correct H
     os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
     np.savez(
         args.output_path,
-        states      = states,
+        conds       = conds,
         actions     = actions,
         obs_keys    = np.array(obs_keys),
         state_dim   = state_dim,
+        cond_dim    = cond_dim,
         action_dim  = action_dim,
+        cond_mode   = cond_mode,
         task        = args.task,
         window_size = H,
     )
