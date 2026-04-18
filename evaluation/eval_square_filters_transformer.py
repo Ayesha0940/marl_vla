@@ -20,6 +20,7 @@ import subprocess
 import argparse
 import json
 import csv
+import re
 from datetime import datetime
 
 import numpy as np
@@ -27,15 +28,6 @@ from collections import deque
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.algo.algo as AlgoModule
 
-original_prepare = AlgoModule.RolloutPolicy._prepare_observation
-
-def patched_prepare(self, ob):
-    ob = original_prepare(self, ob)
-    # Add time dimension for transformer: [B, dim] → [B, 1, dim]
-    ob = {k: v.unsqueeze(1) for k, v in ob.items()}
-    return ob
-
-AlgoModule.RolloutPolicy._prepare_observation = patched_prepare
 
 class EMAFilter:
     """Exponential Moving Average filter for action smoothing."""
@@ -129,6 +121,36 @@ def find_latest_checkpoint(epoch=1000):
     return None
 
 
+def find_best_checkpoint():
+    """Find the checkpoint file with the best rollout success rate.
+
+    The script expects checkpoints saved with a filename suffix like:
+    model_epoch_1100_NutAssemblySquare_success_0.7.pth
+    """
+    pattern = os.path.join(CHECKPOINT_DIR, '*/models/model_epoch_*.pth')
+    candidates = sorted(glob.glob(pattern))
+
+    best_ckpt = None
+    best_success = -1.0
+    success_pattern = re.compile(r'_success_([0-9]+(?:\.[0-9]+)?)\.pth$')
+
+    for ckpt in candidates:
+        m = success_pattern.search(ckpt)
+        if m:
+            success = float(m.group(1))
+            if success > best_success:
+                best_success = success
+                best_ckpt = ckpt
+
+    if best_ckpt is not None:
+        print(f"✅ Best checkpoint found: {best_ckpt} (success={best_success})")
+        return best_ckpt
+
+    print("❌ No best-success checkpoint file found in the checkpoint directory.")
+    print("Please use --epoch or --checkpoint_path instead.")
+    return None
+
+
 # =========================
 # ARGUMENT PARSER
 # =========================
@@ -137,7 +159,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Evaluate square policy robustness with action noise and filtering methods"
     )
-    parser.add_argument('--epoch', type=int, default=2000, help='Checkpoint epoch to load')
+    parser.add_argument('--checkpoint_path', type=str, default=None,
+                        help='Optional explicit checkpoint file path to evaluate')
+    parser.add_argument('--epoch', type=int, default=2000,
+                        help='Checkpoint epoch to load when not using --checkpoint_path or --best')
+    parser.add_argument('--best', action='store_true',
+                        help='Select the best rollout-success checkpoint available in the checkpoint directory')
     parser.add_argument('--n_rollouts', type=int, default=50, help='Number of rollouts per configuration')
     parser.add_argument('--horizon', type=int, default=500, help='Maximum steps per episode')
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
@@ -236,28 +263,13 @@ def run_single_rollout(policy, env, noise_std, filt, horizon):
     ep_reward = 0.0
     success = False
 
-    # Initialise history buffer with zeros
-    obs_filtered = {k: obs[k] for k in POLICY_OBS_KEYS}
-    history = {k: deque([np.zeros_like(v)] * CONTEXT_LENGTH, maxlen=CONTEXT_LENGTH)
-               for k, v in obs_filtered.items()}
-
     for step in range(horizon):
-        obs_filtered = {k: obs[k] for k in POLICY_OBS_KEYS}
-
-        # Update history
-        for k, v in obs_filtered.items():
-            history[k].append(v)
-
-        # Build context tensor [1, T, dim]
-        obs_context = {
-            k: torch.FloatTensor(np.stack(list(history[k]))).unsqueeze(0).cuda()
-            for k in POLICY_OBS_KEYS
-        }
-
         with torch.no_grad():
-            ac = policy.policy.nets['policy'](
-                obs_context, actions=None, goal_dict=None
-            )[:, -1, :].cpu().numpy()[0]
+            ac = policy(obs)
+            if isinstance(ac, torch.Tensor):
+                ac = ac.cpu().numpy()
+            elif isinstance(ac, (list, tuple)):
+                ac = np.asarray(ac[0]) if len(ac) > 0 else np.array([])
 
         if noise_std > 0:
             ac = ac + np.random.normal(0, noise_std, size=ac.shape)
@@ -414,18 +426,30 @@ def main():
     args = parse_arguments()
     
     # Define noise levels and filtering methods to test
-    noise_levels = [0.0, 0.1, 0.2, 0.5, 0.75]
-    methods = ["none", "kalman", "ema", "median"]
+    noise_levels = [0.0]
+    methods = ["none"]
 
     # Setup environment
     setup_mujoco()
 
-    # Load checkpoint
-    agent_path = find_latest_checkpoint(args.epoch)
-    if not agent_path:
-        return 1
+    # Select checkpoint
+    if args.checkpoint_path:
+        agent_path = args.checkpoint_path
+        if not os.path.isfile(agent_path):
+            print(f"❌ Checkpoint file not found: {agent_path}")
+            return 1
+    elif args.best:
+        agent_path = find_best_checkpoint()
+        if not agent_path:
+            return 1
+    else:
+        agent_path = find_latest_checkpoint(args.epoch)
+        if not agent_path:
+            return 1
 
     print(f"\n📦 Using checkpoint: {agent_path}")
+    if args.best:
+        print("⭐ Evaluating best rollout-success checkpoint")
     print(f"🌪 Testing noise stds: {noise_levels}")
     print(f"🔧 Testing methods: {methods}")
 

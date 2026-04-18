@@ -407,8 +407,8 @@ def main():
     args = parse_arguments()
     
     # Define noise levels and filtering methods to test
-    noise_levels = [0.0, 0.1, 0.2, 0.5, 0.75]
-    methods = ["none", "kalman", "ema", "median"]
+    noise_levels = [0.0]
+    methods = ["none"]
 
     # Setup environment
     setup_mujoco()

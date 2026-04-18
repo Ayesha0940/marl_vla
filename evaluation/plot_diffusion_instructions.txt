@@ -17,10 +17,10 @@ Plotting instructions for lift robustness CSV files
 2. Plot by combining diffusion from the base CSV and sweep filter values
 
    python evaluation/plot_diffusion_robustness.py \
-     --csv results/lift/robustness_eval_lift_20260415_002137.csv \
-     --filters-csv results/lift/sweep_lift_20260415_024728.csv \
+     --csv results/can/robustness_eval_can_20260414_055510.csv \
+     --filters-csv results/can/sweep_lift_20260415_091225.csv \
      --metric success_rate \
-     --output results/lift/robustness_eval_lift_combined_success_rate.png
+     --output results/can/robustness_eval_lift_combined_success_rate.png
 
 3. Notes
 

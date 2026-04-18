@@ -1,7 +1,7 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "bc_rnn_square_v3",
+        "name": "bc_rnn_square_v3_seed1",
         "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
@@ -37,7 +37,7 @@
     },
     "train": {
         "data": "/home/axs0940/marl_vla/datasets/square/ph/low_dim_v141.hdf5",
-        "output_dir": "/home/axs0940/marl_vla/checkpoints/bc_rnn_square/",
+        "output_dir": "/home/axs0940/marl_vla/checkpoints/bc_rnn_square/seed1",
         "num_data_workers": 4,
         "hdf5_cache_mode": "all",
         "hdf5_use_swmr": true,
@@ -67,11 +67,14 @@
                 "learning_rate": {
                     "initial": 0.0001,
                     "decay_factor": 0.1,
-                    "epoch_schedule": [1000, 1500],
+                    "epoch_schedule": [
+                        1000,
+                        1500
+                    ],
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 1e-5
+                    "L2": 1e-05
                 }
             }
         },
