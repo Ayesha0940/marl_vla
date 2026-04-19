@@ -1,2 +1,0 @@
-method,noise_std,mean_reward,success_rate,n_rollouts,seed
-none,0.0,0.6400,0.6400,50,0

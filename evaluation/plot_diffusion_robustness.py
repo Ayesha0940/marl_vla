@@ -102,7 +102,7 @@ if __name__ == '__main__':
         csv_file = args.csv
     else:
         PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        csv_file = os.path.join(PROJECT_ROOT, 'results', 'lift', 'robustness_eval_lift_20260415_002137.csv')
+        csv_file = os.path.join(PROJECT_ROOT, 'results', 'square', 'robustness_eval_square_20260419_050551.csv')
 
     plot_data(
         csv_file,

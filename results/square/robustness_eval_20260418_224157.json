@@ -1,0 +1,540 @@
+{
+    "results": [
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.7,
+            "success_rate": 0.7,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.48,
+            "success_rate": 0.48,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.22,
+            "success_rate": 0.22,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.62,
+            "success_rate": 0.62,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.56,
+            "success_rate": 0.56,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.18,
+            "success_rate": 0.18,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.06,
+            "success_rate": 0.06,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.0,
+            "mean_reward": 0.1,
+            "success_rate": 0.1,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.36,
+            "success_rate": 0.36,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.24,
+            "success_rate": 0.24,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.26,
+            "success_rate": 0.26,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.18,
+            "success_rate": 0.18,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.3,
+            "success_rate": 0.3,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.02,
+            "success_rate": 0.02,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.08,
+            "success_rate": 0.08,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.08,
+            "success_rate": 0.08,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.02,
+            "success_rate": 0.02,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.02,
+            "success_rate": 0.02,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.02,
+            "success_rate": 0.02,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.2,
+            "success_rate": 0.2,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.1,
+            "success_rate": 0.1,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.14,
+            "success_rate": 0.14,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.02,
+            "success_rate": 0.02,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "kalman",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "ema",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "median",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=10]",
+            "t_start": 10
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=20]",
+            "t_start": 20
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        }
+    ],
+    "config": {
+        "epoch": 2000,
+        "n_rollouts": 50,
+        "horizon": 500,
+        "seed": 0,
+        "noise_levels": [
+            0.0,
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            0.6
+        ],
+        "methods": [
+            "none",
+            "kalman",
+            "ema",
+            "median",
+            "diffusion[t=10]",
+            "diffusion[t=20]",
+            "diffusion[t=30]",
+            "diffusion[t=40]"
+        ],
+        "diffusion_model": "diffusion_models/square_diffusion_model.pt",
+        "t_start": [
+            10,
+            20,
+            30,
+            40
+        ]
+    }
+}
