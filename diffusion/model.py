@@ -137,7 +137,8 @@ def get_encoder():
     """Return the global ResNet-18 encoder, creating it on first call."""
     global _ENCODER
     if _ENCODER is None:
-        _ENCODER = ResNet18Encoder().eval()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        _ENCODER = ResNet18Encoder().eval().to(device)
     return _ENCODER
 
 
@@ -152,11 +153,32 @@ def encode_image(img_uint8):
         np.array [512] float32
     """
     encoder = get_encoder()
+    device = next(encoder.parameters()).device
     img = torch.FloatTensor(img_uint8).permute(2, 0, 1).unsqueeze(0) / 255.0
+    img = img.to(device)
     # [1, 3, H, W]
     with torch.no_grad():
         feat = encoder(img)
-    return feat.squeeze(0).numpy().astype(np.float32)  # [512]
+    return feat.squeeze(0).cpu().numpy().astype(np.float32)  # [512]
+
+
+def get_image_from_obs(obs_dict):
+    """
+    Extract an image from an obs dict using common robosuite key patterns.
+
+    Prefers agentview, then any key ending with "_image".
+    """
+    if 'agentview_image' in obs_dict:
+        return obs_dict['agentview_image']
+
+    image_keys = [k for k in obs_dict.keys() if k.endswith('_image')]
+    if image_keys:
+        return obs_dict[image_keys[0]]
+
+    raise KeyError(
+        "No image observation found. Expected 'agentview_image' or any '*_image' key. "
+        f"Available keys: {list(obs_dict.keys())}"
+    )
 
 
 def build_cond_vec(obs_dict, obs_keys, cond_mode):
@@ -176,12 +198,12 @@ def build_cond_vec(obs_dict, obs_keys, cond_mode):
         return flatten_obs(obs_dict, obs_keys)
 
     elif cond_mode == 'vision':
-        img = obs_dict['agentview_image']   # [H, W, 3] uint8
+        img = get_image_from_obs(obs_dict)  # [H, W, 3] uint8
         return encode_image(img)
 
     elif cond_mode == 'state+vision':
         state = flatten_obs(obs_dict, obs_keys)
-        img   = obs_dict['agentview_image']
+        img   = get_image_from_obs(obs_dict)
         vis   = encode_image(img)
         return np.concatenate([state, vis]).astype(np.float32)
 

@@ -176,7 +176,6 @@ def create_filter(method, action_dim):
 # =========================
 
 def load_policy_and_environment(checkpoint_path):
-    """Load BC-RNN policy and environment from robomimic checkpoint."""
     import robomimic.utils.file_utils as FileUtils
     import robomimic.utils.env_utils as EnvUtils
     import torch
@@ -190,12 +189,26 @@ def load_policy_and_environment(checkpoint_path):
     )
     print("✅ Policy loaded")
 
+    # Check if diffusion model needs camera obs
+    from diffusion.model import DIFFUSION_CONSTS
+    cond_mode   = DIFFUSION_CONSTS.get("cond_mode", "state")
+    needs_vision = cond_mode in ("vision", "state+vision")
+
     env_meta = ckpt_dict["env_metadata"]
+
+    if needs_vision:
+        env_meta['env_kwargs']['camera_names']           = ['agentview']
+        env_meta['env_kwargs']['camera_heights']         = 84
+        env_meta['env_kwargs']['camera_widths']          = 84
+        env_meta['env_kwargs']['use_camera_obs']         = True
+        env_meta['env_kwargs']['has_offscreen_renderer'] = True
+        print("📷 Camera obs enabled for vision conditioning")
+
     env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta,
-        render=False,
-        render_offscreen=False,
-        use_image_obs=False,
+        env_meta         = env_meta,
+        render           = False,
+        render_offscreen = needs_vision,
+        use_image_obs    = needs_vision,
     )
     print("✅ Environment created")
 

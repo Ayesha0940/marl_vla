@@ -176,7 +176,6 @@ def create_filter(method, action_dim):
 # =========================
 
 def load_policy_and_environment(checkpoint_path):
-    """Load BC-RNN policy and environment from robomimic checkpoint."""
     import robomimic.utils.file_utils as FileUtils
     import robomimic.utils.env_utils as EnvUtils
     import torch
@@ -190,12 +189,26 @@ def load_policy_and_environment(checkpoint_path):
     )
     print("✅ Policy loaded")
 
+    # Check if diffusion model needs camera obs
+    from diffusion.model import DIFFUSION_CONSTS
+    cond_mode   = DIFFUSION_CONSTS.get("cond_mode", "state")
+    needs_vision = cond_mode in ("vision", "state+vision")
+
     env_meta = ckpt_dict["env_metadata"]
+
+    if needs_vision:
+        env_meta['env_kwargs']['camera_names']           = ['agentview']
+        env_meta['env_kwargs']['camera_heights']         = 84
+        env_meta['env_kwargs']['camera_widths']          = 84
+        env_meta['env_kwargs']['use_camera_obs']         = True
+        env_meta['env_kwargs']['has_offscreen_renderer'] = True
+        print("📷 Camera obs enabled for vision conditioning")
+
     env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta,
-        render=False,
-        render_offscreen=False,
-        use_image_obs=False,
+        env_meta         = env_meta,
+        render           = False,
+        render_offscreen = needs_vision,
+        use_image_obs    = needs_vision,
     )
     print("✅ Environment created")
 
@@ -213,6 +226,33 @@ def get_action_dimension(env, policy):
     except:
         action_dim = len(policy(env.reset()))
     return action_dim
+
+
+def ensure_image_obs(obs, env):
+    """
+    Ensure observation dict contains at least one '*_image' key.
+
+    Some robomimic wrappers may omit camera frames in obs even when
+    offscreen rendering is enabled. In that case, render one frame explicitly.
+    """
+    if 'agentview_image' in obs or any(k.endswith('_image') for k in obs.keys()):
+        return obs
+
+    frame = None
+    if hasattr(env, 'env') and hasattr(env.env, 'sim'):
+        frame = env.env.sim.render(width=84, height=84, camera_name='agentview')
+    elif hasattr(env, 'sim'):
+        frame = env.sim.render(width=84, height=84, camera_name='agentview')
+
+    if frame is None:
+        raise RuntimeError(
+            "Diffusion vision conditioning requested, but no image key was found "
+            "and offscreen render returned None."
+        )
+
+    obs = dict(obs)
+    obs['agentview_image'] = frame.astype(np.uint8)
+    return obs
 
 
 # =========================
@@ -247,12 +287,11 @@ def run_single_rollout(policy, env, noise_std, method, filt, horizon,
     # Import diffusion utils lazily — only pay the import cost if needed
     if method == "diffusion":
         from diffusion.model import (
-            flatten_obs,
+            build_cond_vec,
             diffusion_denoise_action,
             diffusion_denoise_action_window,
+            DIFFUSION_CONSTS,
         )
-        # Choose inference function based on H saved in loaded model
-        from diffusion.model import DIFFUSION_CONSTS
         use_window = DIFFUSION_CONSTS.get("H", 1) > 1
 
     for step in range(horizon):
@@ -271,19 +310,20 @@ def run_single_rollout(policy, env, noise_std, method, filt, horizon,
         # -----------------------------------------------
         if method == "diffusion":
             # Flatten obs to state vector for conditioning
-            state_vec = flatten_obs(obs, obs_keys)
+            cond_mode = DIFFUSION_CONSTS.get("cond_mode", "state")
+            if cond_mode in ("vision", "state+vision"):
+                obs = ensure_image_obs(obs, env)
+            cond_vec  = build_cond_vec(obs, obs_keys, cond_mode)
             if use_window:
-                # H>1: denoise full window, execute only step 0
                 action = diffusion_denoise_action_window(
                     noisy_action_vec = noisy_action,
-                    state_vec        = state_vec,
+                    cond_vec         = cond_vec,
                     t_start          = t_start,
                 )
             else:
-                # H=1: single step denoising
                 action = diffusion_denoise_action(
                     noisy_action_vec = noisy_action,
-                    state_vec        = state_vec,
+                    cond_vec         = cond_vec,
                     t_start          = t_start,
                 )
 
@@ -448,7 +488,7 @@ def main():
     # -------------------------
     # Build methods list
     # -------------------------
-    methods = ["none", "kalman", "ema", "median"]
+    methods = ["none"]
 
     if use_diffusion:
         # Add one diffusion entry per t_start value

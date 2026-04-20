@@ -160,6 +160,33 @@ def load_policy_and_env(checkpoint_path, cond_mode):
     return policy, env, ckpt_dict
 
 
+def ensure_image_obs(obs, env):
+    """
+    Ensure observation dict contains at least one '*_image' key.
+
+    Some robomimic env wrappers may not include camera frames in obs even when
+    offscreen rendering is enabled. In that case, render one frame explicitly.
+    """
+    if 'agentview_image' in obs or any(k.endswith('_image') for k in obs.keys()):
+        return obs
+
+    frame = None
+    if hasattr(env, 'env') and hasattr(env.env, 'sim'):
+        frame = env.env.sim.render(width=84, height=84, camera_name='agentview')
+    elif hasattr(env, 'sim'):
+        frame = env.sim.render(width=84, height=84, camera_name='agentview')
+
+    if frame is None:
+        raise RuntimeError(
+            "Vision conditioning requested, but no image key was found and "
+            "offscreen render returned None."
+        )
+
+    obs = dict(obs)
+    obs['agentview_image'] = frame.astype(np.uint8)
+    return obs
+
+
 # =========================
 # SINGLE EPISODE COLLECTION
 # =========================
@@ -190,6 +217,9 @@ def collect_episode(policy, env, obs_keys, cond_mode, horizon):
     success    = False
 
     for step in range(horizon):
+        if cond_mode in ('vision', 'state+vision'):
+            obs = ensure_image_obs(obs, env)
+
         # Build conditioning vector — handles all three modes
         cond_vec = build_cond_vec(obs, obs_keys, cond_mode)
 

@@ -11,7 +11,7 @@ from datetime import datetime
 # PATH SETUP
 # =========================
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHECKPOINT_DIR = os.path.join(PROJECT_ROOT, 'checkpoints/bc_rnn_square/bc_rnn_square')
+CHECKPOINT_DIR = os.path.join(PROJECT_ROOT, 'checkpoints', 'bc_rnn_square')
 RESULTS_DIR = os.path.join(PROJECT_ROOT, 'results', 'square')
 VIDEO_DIR = RESULTS_DIR
 
@@ -38,10 +38,31 @@ def setup_mujoco():
 # =========================
 # CHECKPOINT
 # =========================
-def find_latest_checkpoint(epoch=1000):
-    pattern = os.path.join(CHECKPOINT_DIR, f'*/models/model_epoch_{epoch}.pth')
-    matches = sorted(glob.glob(pattern))
+def find_checkpoint(epoch=1000, checkpoint_name=None):
+    if checkpoint_name:
+        pattern = os.path.join(CHECKPOINT_DIR, '**', 'models', checkpoint_name)
+        matches = sorted(glob.glob(pattern, recursive=True))
+        return matches[-1] if matches else None
+
+    pattern = os.path.join(CHECKPOINT_DIR, '**', 'models', f'model_epoch_{epoch}.pth')
+    matches = sorted(glob.glob(pattern, recursive=True))
     return matches[-1] if matches else None
+
+
+def render_frame(env, width=256, height=256, camera_name='agentview'):
+    # Try high-level wrapper render first, then fall back to simulator access.
+    try:
+        frame = env.render(mode='rgb_array', height=height, width=width, camera_name=camera_name)
+        if frame is not None:
+            return frame
+    except Exception:
+        pass
+
+    sim = getattr(getattr(env, 'env', None), 'sim', None)
+    if sim is not None:
+        return sim.render(width=width, height=height, camera_name=camera_name)
+
+    return None
 
 
 # =========================
@@ -50,17 +71,30 @@ def find_latest_checkpoint(epoch=1000):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', type=int, default=1000)
+    parser.add_argument('--checkpoint_name', type=str, default=None,
+                        help='Exact checkpoint filename under checkpoints/bc_rnn_square/**/models/')
+    parser.add_argument('--checkpoint_path', type=str, default=None,
+                        help='Absolute or project-relative path to checkpoint file')
     parser.add_argument('--n_rollouts', type=int, default=10)
     parser.add_argument('--horizon', type=int, default=500)
     args = parser.parse_args()
 
-    noise_levels = [0.1, 0.2, 0.5, 1.0]
+    noise_levels = [0.0]
 
     setup_mujoco()
 
-    agent_path = find_latest_checkpoint(args.epoch)
+    if args.checkpoint_path:
+        agent_path = args.checkpoint_path
+        if not os.path.isabs(agent_path):
+            agent_path = os.path.join(PROJECT_ROOT, agent_path)
+    else:
+        agent_path = find_checkpoint(args.epoch, args.checkpoint_name)
+
     if not agent_path:
         print("❌ No checkpoint found")
+        return
+    if not os.path.exists(agent_path):
+        print(f"❌ Checkpoint does not exist: {agent_path}")
         return
 
     print(f"\n📦 Using checkpoint: {agent_path}")
@@ -129,11 +163,7 @@ def main():
                 # 🎥 RECORD FRAME
                 if record_video:
                     try:
-                        frame = env.env.sim.render(
-                            width=256,
-                            height=256,
-                            camera_name="agentview"
-                        )
+                        frame = render_frame(env, width=256, height=256, camera_name='agentview')
                         if frame is not None:
                             frames.append(frame)
                         else:
@@ -156,7 +186,7 @@ def main():
                 if len(frames) > 0:
                     video_path = os.path.join(
                         VIDEO_DIR,
-                        f"noise_{noise_std:.2f}.mp4"
+                        f"square_noise_{noise_std:.2f}_{os.path.splitext(os.path.basename(agent_path))[0]}.mp4"
                     )
 
                     imageio.mimsave(video_path, frames, fps=20)
