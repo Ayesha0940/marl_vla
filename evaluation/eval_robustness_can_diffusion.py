@@ -448,7 +448,7 @@ def main():
     # -------------------------
     # Build methods list
     # -------------------------
-    methods = ["none", "kalman", "ema", "median"]
+    methods = ["none"]
 
     if use_diffusion:
         # Add one diffusion entry per t_start value
@@ -456,7 +456,7 @@ def main():
             methods.append(f"diffusion[t={t}]")
 
     # Noise levels
-    noise_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+    noise_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0]
 
     # -------------------------
     # Load BC-RNN policy
