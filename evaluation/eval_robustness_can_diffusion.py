@@ -148,7 +148,7 @@ def parse_arguments():
                         help='Reverse diffusion start step(s). '
                              'Multiple values run separate sweeps. '
                              'Default: 40. Try: --t_start 10 20 40')
-        parser.add_argument('--render_gpu_id', type=int, default=None,
+    parser.add_argument('--render_gpu_id', type=int, default=None,
                         help='Preferred GPU id for MuJoCo offscreen rendering. '
                             'If not set, script will try visible GPUs in order.')
 
@@ -573,7 +573,7 @@ def main():
             methods.append(f"diffusion[t={t}]")
 
     # Noise levels
-    noise_levels = [0.1, 0.3, 0.6, 0.9, 1.25, 1.5, 1.75, 2.0]
+    noise_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0]
 
     # -------------------------
     # Load BC-RNN policy

@@ -332,8 +332,6 @@ def ensure_image_obs(obs, env):
     obs = dict(obs)
     obs['agentview_image'] = frame.astype(np.uint8)
     return obs
-
-
 # =========================
 # SINGLE ROLLOUT EVALUATION
 # =========================

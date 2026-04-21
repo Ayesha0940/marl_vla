@@ -1,0 +1,53 @@
+# Square diffusion data collection and training commands
+# Using seed1 best BC-RNN checkpoint for Square task
+
+# 1) Collect diffusion training data
+python diffusion/collect_diffusion_data.py \
+  --checkpoint /home/axs0940/marl_vla/checkpoints/bc_rnn_square/seed1/bc_rnn_square_v3_seed1/20260418035142/models/model_epoch_800_NutAssemblySquare_success_0.8.pth \
+  --task square \
+  --n_episodes 200 \
+  --horizon 500 \
+  --window_size 1 \
+  --output_path diffusion_data/square_diffusion_data_H1.npz \
+  --seed 1
+
+# 2) Train the diffusion model
+python diffusion/train_diffusion.py \
+  --data_path diffusion_data/square_diffusion_data_H1.npz \
+  --output_path diffusion_models/square_diffusion_model.pt \
+  --task square \
+  --diffusion_steps 100 \
+  --hidden_dim 256 \
+  --batch_size 256 \
+  --num_epochs 100 \
+  --lr 1e-4 \
+  --seed 1
+
+
+# 3) Evaluate robustness with diffusion
+python evaluation/eval_robustness_square_diffusion.py \
+  --checkpoint_path /home/axs0940/marl_vla/checkpoints/bc_rnn_square/seed1/bc_rnn_square_v3_seed1/20260418035142/models/model_epoch_800_NutAssemblySquare_success_0.8.pth \
+  --diffusion_model diffusion_models/square_diffusion_model.pt \
+  --t_start 10 20 30 40 \
+  --n_rollouts 50
+
+# Optional: if you want H=10 sliding windows instead of H=1
+python diffusion/collect_diffusion_data.py \
+  --checkpoint /home/axs0940/marl_vla/checkpoints/bc_rnn_square/seed1/bc_rnn_square_v3_seed1/20260418035142/models/model_epoch_800_NutAssemblySquare_success_0.8.pth \
+  --task square \
+  --n_episodes 200 \
+  --horizon 500 \
+  --window_size 10 \
+  --output_path diffusion_data/square_diffusion_data_H10.npz \
+  --seed 1
+
+python diffusion/train_diffusion.py \
+  --data_path diffusion_data/square_diffusion_data_H10.npz \
+  --output_path diffusion_models/square_diffusion_model_H10.pt \
+  --task square \
+  --diffusion_steps 100 \
+  --hidden_dim 256 \
+  --batch_size 256 \
+  --num_epochs 100 \
+  --lr 1e-4 \
+  --seed 1
