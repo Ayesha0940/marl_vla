@@ -1,0 +1,21 @@
+
+1) collect diffusion data (state, vision, state+vision) task (lift, can, square)
+CUDA_VISIBLE_DEVICES=4 python -m diffusion.collect_diffusion_data \
+    --checkpoint checkpoints/bc_rnn_can/bc_rnn_can/*/models/model_epoch_600.pth \
+    --task can \
+    --n_episodes 200 \
+    --cond_mode vision \
+    --output_path diffusion_data/can_diffusion_data_H1_vision.npz
+
+2) train diffusion model
+CUDA_VISIBLE_DEVICES=4 python -m diffusion.train_diffusion \
+    --data_path diffusion_data/can_diffusion_data_H1_vision.npz \
+    --task can \
+    --output_path diffusion_models/can_diffusion_model_vision.pt \
+    --num_epochs 200
+
+3) evaluate diffusion model
+CUDA_VISIBLE_DEVICES=1 python -m evaluation.eval_robustness_can_diffusion \
+    --diffusion_model diffusion_models/can_diffusion_model_vision.pt \
+    --t_start 30 35 40 \
+    --n_rollouts 50

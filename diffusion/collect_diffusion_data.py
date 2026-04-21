@@ -106,6 +106,18 @@ def parse_arguments():
         '--seed', type=int, default=0,
         help='Random seed'
     )
+    parser.add_argument(
+        '--device', type=str, default='auto', choices=['auto', 'cuda', 'cpu'],
+        help='Device for loading policy: auto | cuda | cpu (default: auto)'
+    )
+    parser.add_argument(
+        '--cuda_index', type=int, default=0,
+        help='CUDA device index to use when --device=cuda (default: 0)'
+    )
+    parser.add_argument(
+        '--no_cpu_fallback', action='store_true',
+        help='Disable automatic CPU fallback when CUDA OOM occurs'
+    )
     return parser.parse_args()
 
 
@@ -113,7 +125,13 @@ def parse_arguments():
 # POLICY AND ENV LOADING
 # =========================
 
-def load_policy_and_env(checkpoint_path, cond_mode):
+def load_policy_and_env(
+    checkpoint_path,
+    cond_mode,
+    device_mode='auto',
+    cuda_index=0,
+    allow_cpu_fallback=True,
+):
     """
     Load robomimic policy and environment from checkpoint.
     Enables camera obs when cond_mode requires vision.
@@ -127,14 +145,42 @@ def load_policy_and_env(checkpoint_path, cond_mode):
     import robomimic.utils.file_utils as FileUtils
     import robomimic.utils.env_utils as EnvUtils
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cuda_device = f'cuda:{cuda_index}'
+
+    if device_mode == 'cpu':
+        device = torch.device('cpu')
+    elif device_mode == 'cuda':
+        device = torch.device(cuda_device)
+    else:
+        device = torch.device(cuda_device if torch.cuda.is_available() else 'cpu')
+
     print(f"🖥  Device: {device}")
 
-    policy, ckpt_dict = FileUtils.policy_from_checkpoint(
-        ckpt_path=checkpoint_path,
-        device=device,
-        verbose=False
-    )
+    try:
+        policy, ckpt_dict = FileUtils.policy_from_checkpoint(
+            ckpt_path=checkpoint_path,
+            device=device,
+            verbose=False
+        )
+    except Exception as e:
+        # Busy/shared GPUs can fail at checkpoint load time. If auto mode picked
+        # CUDA, retry once on CPU so collection can still run.
+        err_msg = str(e).lower()
+        cuda_oom = (
+            device.type == 'cuda' and
+            allow_cpu_fallback and
+            ('out of memory' in err_msg or 'cudaerrormemoryallocation' in err_msg)
+        )
+        if not cuda_oom:
+            raise
+        print("⚠️  CUDA OOM while loading checkpoint; retrying on CPU...")
+        device = torch.device('cpu')
+        policy, ckpt_dict = FileUtils.policy_from_checkpoint(
+            ckpt_path=checkpoint_path,
+            device=device,
+            verbose=False
+        )
+        print(f"🖥  Device fallback: {device}")
     print("✅ Policy loaded")
 
     env_meta = ckpt_dict["env_metadata"]
@@ -298,7 +344,13 @@ def main():
         )
 
     # Load policy and environment
-    policy, env, ckpt_dict = load_policy_and_env(args.checkpoint, cond_mode)
+    policy, env, ckpt_dict = load_policy_and_env(
+        args.checkpoint,
+        cond_mode,
+        args.device,
+        args.cuda_index,
+        allow_cpu_fallback=(not args.no_cpu_fallback),
+    )
 
     # Auto-detect dims from checkpoint
     from diffusion.model import get_task_dims, get_cond_dim

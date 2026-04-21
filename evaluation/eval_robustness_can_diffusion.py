@@ -104,7 +104,9 @@ def setup_mujoco():
     current  = os.environ.get('LD_LIBRARY_PATH', '')
     new_paths = [p for p in paths if os.path.exists(p)]
     os.environ['LD_LIBRARY_PATH'] = ":".join(new_paths + [current])
+    os.environ.setdefault('MUJOCO_GL', 'egl')
     print("🔧 LD_LIBRARY_PATH configured")
+    print(f"🔧 MUJOCO_GL={os.environ.get('MUJOCO_GL')}")
 
 
 # =========================
@@ -146,6 +148,9 @@ def parse_arguments():
                         help='Reverse diffusion start step(s). '
                              'Multiple values run separate sweeps. '
                              'Default: 40. Try: --t_start 10 20 40')
+        parser.add_argument('--render_gpu_id', type=int, default=None,
+                        help='Preferred GPU id for MuJoCo offscreen rendering. '
+                            'If not set, script will try visible GPUs in order.')
 
     return parser.parse_args()
 
@@ -175,19 +180,58 @@ def create_filter(method, action_dim):
 # POLICY AND ENVIRONMENT LOADING
 # =========================
 
-def load_policy_and_environment(checkpoint_path):
+def _candidate_render_gpu_ids(preferred_id=None):
+    """Build ordered list of render GPU ids to try for offscreen EGL."""
+    if preferred_id is not None:
+        return [preferred_id]
+
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if visible:
+        ids = []
+        for tok in visible.split(','):
+            tok = tok.strip()
+            if tok.isdigit():
+                ids.append(int(tok))
+        return ids or [0]
+
+    return list(range(8))
+
+
+def load_policy_and_environment(checkpoint_path, render_gpu_id=None):
     import robomimic.utils.file_utils as FileUtils
     import robomimic.utils.env_utils as EnvUtils
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    policy, ckpt_dict = FileUtils.policy_from_checkpoint(
-        ckpt_path=checkpoint_path,
-        device=device,
-        verbose=False
-    )
+    try:
+        policy, ckpt_dict = FileUtils.policy_from_checkpoint(
+            ckpt_path=checkpoint_path,
+            device=device,
+            verbose=False
+        )
+    except Exception as exc:
+        err = str(exc).lower()
+        is_cuda_oom = (
+            torch.cuda.is_available()
+            and device.type == "cuda"
+            and ("out of memory" in err or "cudaerrormemoryallocation" in err)
+        )
+        if not is_cuda_oom:
+            raise
+
+        print("⚠️  CUDA OOM while loading checkpoint on GPU. Retrying on CPU...")
+        torch.cuda.empty_cache()
+        cpu_device = torch.device("cpu")
+        policy, ckpt_dict = FileUtils.policy_from_checkpoint(
+            ckpt_path=checkpoint_path,
+            device=cpu_device,
+            verbose=False
+        )
+        device = cpu_device
+
     print("✅ Policy loaded")
+    print(f"🖥️  Policy device: {device}")
 
     # Check if diffusion model needs camera obs
     from diffusion.model import DIFFUSION_CONSTS
@@ -197,22 +241,53 @@ def load_policy_and_environment(checkpoint_path):
     env_meta = ckpt_dict["env_metadata"]
 
     if needs_vision:
-        env_meta['env_kwargs']['camera_names']           = ['agentview']
-        env_meta['env_kwargs']['camera_heights']         = 84
-        env_meta['env_kwargs']['camera_widths']          = 84
-        env_meta['env_kwargs']['use_camera_obs']         = True
+        env_meta['env_kwargs']['camera_names'] = ['agentview']
+        env_meta['env_kwargs']['camera_heights'] = 84
+        env_meta['env_kwargs']['camera_widths'] = 84
+        env_meta['env_kwargs']['use_camera_obs'] = True
         env_meta['env_kwargs']['has_offscreen_renderer'] = True
         print("📷 Camera obs enabled for vision conditioning")
 
-    env = EnvUtils.create_env_from_metadata(
-        env_meta         = env_meta,
-        render           = False,
-        render_offscreen = needs_vision,
-        use_image_obs    = needs_vision,
-    )
-    print("✅ Environment created")
+    if not needs_vision:
+        env = EnvUtils.create_env_from_metadata(
+            env_meta=env_meta,
+            render=False,
+            render_offscreen=False,
+            use_image_obs=False,
+        )
+        print("✅ Environment created")
+        return policy, env
 
-    return policy, env
+    last_exc = None
+    candidates = _candidate_render_gpu_ids(preferred_id=render_gpu_id)
+    for gpu_id in candidates:
+        try:
+            env_meta_try = dict(env_meta)
+            env_kwargs_try = dict(env_meta_try.get('env_kwargs', {}))
+            env_kwargs_try['render_gpu_device_id'] = int(gpu_id)
+            env_meta_try['env_kwargs'] = env_kwargs_try
+
+            print(f"🎯 Trying render_gpu_device_id={gpu_id}")
+            env = EnvUtils.create_env_from_metadata(
+                env_meta=env_meta_try,
+                render=False,
+                render_offscreen=True,
+                use_image_obs=True,
+            )
+            print(f"✅ Environment created (render GPU {gpu_id})")
+            return policy, env
+        except Exception as exc:
+            last_exc = exc
+            err = str(exc).lower()
+            if "framebuffer is not complete" in err or "egl" in err:
+                print(f"⚠️  Render GPU {gpu_id} failed: {exc}")
+                continue
+            raise
+
+    raise RuntimeError(
+        "Failed to create MuJoCo offscreen renderer on all candidate GPUs. "
+        "Try --render_gpu_id with a less loaded GPU (e.g., 0)."
+    ) from last_exc
 
 
 # =========================
@@ -226,6 +301,33 @@ def get_action_dimension(env, policy):
     except:
         action_dim = len(policy(env.reset()))
     return action_dim
+
+
+def ensure_image_obs(obs, env):
+    """
+    Ensure observation dict contains at least one '*_image' key.
+
+    Some robomimic wrappers may omit camera frames in obs even when
+    offscreen rendering is enabled. In that case, render one frame explicitly.
+    """
+    if 'agentview_image' in obs or any(k.endswith('_image') for k in obs.keys()):
+        return obs
+
+    frame = None
+    if hasattr(env, 'env') and hasattr(env.env, 'sim'):
+        frame = env.env.sim.render(width=84, height=84, camera_name='agentview')
+    elif hasattr(env, 'sim'):
+        frame = env.sim.render(width=84, height=84, camera_name='agentview')
+
+    if frame is None:
+        raise RuntimeError(
+            "Diffusion vision conditioning requested, but no image key was found "
+            "and offscreen render returned None."
+        )
+
+    obs = dict(obs)
+    obs['agentview_image'] = frame.astype(np.uint8)
+    return obs
 
 
 # =========================
@@ -260,12 +362,12 @@ def run_single_rollout(policy, env, noise_std, method, filt, horizon,
     # Import diffusion utils lazily — only pay the import cost if needed
     if method == "diffusion":
         from diffusion.model import (
-            flatten_obs,
+            build_cond_vec,
             diffusion_denoise_action,
             diffusion_denoise_action_window,
+            DIFFUSION_CONSTS,
         )
         # Choose inference function based on H saved in loaded model
-        from diffusion.model import DIFFUSION_CONSTS
         use_window = DIFFUSION_CONSTS.get("H", 1) > 1
 
     for step in range(horizon):
@@ -283,20 +385,22 @@ def run_single_rollout(policy, env, noise_std, method, filt, horizon,
         # Denoising branch
         # -----------------------------------------------
         if method == "diffusion":
-            # Flatten obs to state vector for conditioning
-            state_vec = flatten_obs(obs, obs_keys)
+            cond_mode = DIFFUSION_CONSTS.get("cond_mode", "state")
+            if cond_mode in ("vision", "state+vision"):
+                obs = ensure_image_obs(obs, env)
+            cond_vec = build_cond_vec(obs, obs_keys, cond_mode)
             if use_window:
                 # H>1: denoise full window, execute only step 0
                 action = diffusion_denoise_action_window(
                     noisy_action_vec = noisy_action,
-                    state_vec        = state_vec,
+                    cond_vec         = cond_vec,
                     t_start          = t_start,
                 )
             else:
                 # H=1: single step denoising
                 action = diffusion_denoise_action(
                     noisy_action_vec = noisy_action,
-                    state_vec        = state_vec,
+                    cond_vec         = cond_vec,
                     t_start          = t_start,
                 )
 
@@ -461,7 +565,7 @@ def main():
     # -------------------------
     # Build methods list
     # -------------------------
-    methods = ["none", "kalman", "ema", "median"]
+    methods = ["none"]
 
     if use_diffusion:
         # Add one diffusion entry per t_start value
@@ -469,7 +573,7 @@ def main():
             methods.append(f"diffusion[t={t}]")
 
     # Noise levels
-    noise_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+    noise_levels = [0.1, 0.3, 0.6, 0.9, 1.25, 1.5, 1.75, 2.0]
 
     # -------------------------
     # Load BC-RNN policy
@@ -482,7 +586,7 @@ def main():
     print(f"🌪  Noise levels:      {noise_levels}")
     print(f"🔧  Methods:           {methods}\n")
 
-    policy, env = load_policy_and_environment(agent_path)
+    policy, env = load_policy_and_environment(agent_path, render_gpu_id=args.render_gpu_id)
     action_dim  = get_action_dimension(env, policy)
     print(f"🔍 Action dimension: {action_dim}")
 

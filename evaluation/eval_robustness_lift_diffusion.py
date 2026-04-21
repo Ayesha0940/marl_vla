@@ -182,12 +182,34 @@ def load_policy_and_environment(checkpoint_path):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    policy, ckpt_dict = FileUtils.policy_from_checkpoint(
-        ckpt_path=checkpoint_path,
-        device=device,
-        verbose=False
-    )
+    try:
+        policy, ckpt_dict = FileUtils.policy_from_checkpoint(
+            ckpt_path=checkpoint_path,
+            device=device,
+            verbose=False
+        )
+    except Exception as exc:
+        err = str(exc).lower()
+        is_cuda_oom = (
+            torch.cuda.is_available()
+            and device.type == "cuda"
+            and ("out of memory" in err or "cudaerrormemoryallocation" in err)
+        )
+        if not is_cuda_oom:
+            raise
+
+        print("⚠️  CUDA OOM while loading checkpoint on GPU. Retrying on CPU...")
+        torch.cuda.empty_cache()
+        cpu_device = torch.device("cpu")
+        policy, ckpt_dict = FileUtils.policy_from_checkpoint(
+            ckpt_path=checkpoint_path,
+            device=cpu_device,
+            verbose=False
+        )
+        device = cpu_device
+
     print("✅ Policy loaded")
+    print(f"🖥️  Policy device: {device}")
 
     # Check if diffusion model needs camera obs
     from diffusion.model import DIFFUSION_CONSTS
