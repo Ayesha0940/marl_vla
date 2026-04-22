@@ -1,0 +1,248 @@
+MARL-VLA Evaluation Instructions (Single Entry Point)
+=====================================================
+
+Overview
+--------
+Use a single command entry point for evaluation:
+
+  python evaluation/eval.py --task <task> --suite <suite> [options]
+
+This guide explains:
+1) how to run all evaluation suites from eval.py,
+2) suite-specific examples,
+3) outputs and expected files,
+4) troubleshooting tips.
+
+
+1) Prerequisites
+----------------
+- Activate the environment that contains robomimic and project dependencies.
+- Run from repository root:
+
+  cd /home/axs0940/marl_vla
+
+- Optional quick check:
+
+  python evaluation/eval.py --list
+
+
+2) Core CLI Pattern
+-------------------
+General form:
+
+  python evaluation/eval.py --task <task> --suite <suite> [flags]
+
+Useful common flags:
+- --epoch INT
+- --n_rollouts INT
+- --horizon INT
+- --seed INT
+- --checkpoint_path PATH
+- --checkpoint_name FILE      (square video suite)
+- --checkpoint_root PATH
+- --run_dir PATH
+- --diffusion_model PATH
+- --t_start INT [INT ...]
+- --render_gpu_id INT
+- --best
+- --all_runs
+- --epochs 100,200,300      (transport sweep)
+- --dry_run                 (prints plan without full execution)
+
+
+3) Supported Suites (All Implemented in eval.py)
+-------------------------------------------------
+All suites are internal to eval.py.
+
+Task: can
+- standard
+- filters
+- robustness
+- robustness-diffusion
+- robustness-video
+
+Task: lift
+- standard
+- filters
+- kalman
+- robustness
+- robustness-diffusion
+- robustness-video
+
+Task: square
+- filters
+- filters-transformer
+- robustness-diffusion
+- robustness-video
+
+Task: transport
+- standard
+- sweep
+
+
+4) Commands by Suite
+--------------------
+4.1 can standard
+
+  python evaluation/eval.py --task can --suite standard --epoch 600 --n_rollouts 50 --horizon 400 --seed 0
+
+4.2 lift standard
+
+  python evaluation/eval.py --task lift --suite standard --epoch 600 --n_rollouts 50 --horizon 400 --seed 0
+
+4.3 transport standard (latest run)
+
+  python evaluation/eval.py --task transport --suite standard --n_rollouts 50 --horizon 700
+
+4.4 transport standard (specific run and epoch)
+
+  python evaluation/eval.py --task transport --suite standard \
+    --run_dir checkpoints/bc_rnn/bc_rnn_transport_tuned/bc_rnn_transport_tuned/<RUN_ID> \
+    --epoch 1000 --n_rollouts 50 --horizon 700
+
+4.5 transport sweep
+
+  python evaluation/eval.py --task transport --suite sweep \
+    --run_dir checkpoints/bc_rnn/bc_rnn_transport_tuned/bc_rnn_transport_tuned/<RUN_ID> \
+    --epochs 200,400,600,800,1000 --n_rollouts 100 --horizon 700
+
+4.6 can robustness (noise-only)
+
+  python evaluation/eval.py --task can --suite robustness \
+    --epoch 600 --n_rollouts 50 --horizon 400
+
+4.7 can filters (best-parameter sweep)
+
+  python evaluation/eval.py --task can --suite filters \
+    --epoch 600 --n_rollouts 50 --horizon 400
+
+4.8 can robustness-diffusion
+
+  python evaluation/eval.py --task can --suite robustness-diffusion \
+    --epoch 600 --diffusion_model diffusion_models/can_diffusion_model_H1.pt \
+    --t_start 10 20 40 --n_rollouts 50 --horizon 400
+
+4.9 can robustness-video
+
+  python evaluation/eval.py --task can --suite robustness-video \
+    --epoch 600 --n_rollouts 10 --horizon 400
+
+4.10 lift robustness (noise-only)
+
+  python evaluation/eval.py --task lift --suite robustness \
+    --epoch 600 --n_rollouts 50 --horizon 400
+
+4.11 lift filters (best-parameter sweep)
+
+  python evaluation/eval.py --task lift --suite filters \
+    --epoch 600 --n_rollouts 50 --horizon 400
+
+4.12 lift kalman
+
+  python evaluation/eval.py --task lift --suite kalman \
+    --epoch 600 --n_rollouts 50 --horizon 400
+
+4.13 lift robustness-diffusion
+
+  python evaluation/eval.py --task lift --suite robustness-diffusion \
+    --epoch 600 --diffusion_model diffusion_models/lift_diffusion_model_H1.pt \
+    --t_start 10 20 40 --n_rollouts 50 --horizon 400
+
+4.14 lift robustness-video
+
+  python evaluation/eval.py --task lift --suite robustness-video \
+    --epoch 600 --n_rollouts 10 --horizon 400
+
+4.15 square filters
+
+  python evaluation/eval.py --task square --suite filters \
+    --epoch 2000 --n_rollouts 50 --horizon 500
+
+4.16 square filters-transformer
+
+  python evaluation/eval.py --task square --suite filters-transformer \
+    --epoch 2000 --n_rollouts 50 --horizon 500
+
+4.17 square robustness-diffusion (by epoch)
+
+  python evaluation/eval.py --task square --suite robustness-diffusion \
+    --epoch 2000 --diffusion_model diffusion_models/square_diffusion_model.pt \
+    --t_start 10 20 40 --n_rollouts 50 --horizon 500
+
+4.18 square robustness-diffusion (best checkpoint filename pattern)
+
+  python evaluation/eval.py --task square --suite robustness-diffusion \
+    --best --diffusion_model diffusion_models/square_diffusion_model.pt --t_start 20 40
+
+4.19 square robustness-video (epoch search)
+
+  python evaluation/eval.py --task square --suite robustness-video \
+    --epoch 1000 --n_rollouts 10 --horizon 500
+
+4.20 square robustness-video (explicit checkpoint name)
+
+  python evaluation/eval.py --task square --suite robustness-video \
+    --checkpoint_name model_epoch_1000.pth --n_rollouts 10 --horizon 500
+
+
+5) Dry-Run Mode
+---------------
+Use dry-run to verify checkpoint resolution, method/noise plans, and transport selection logic:
+
+  python evaluation/eval.py --task can --suite robustness-diffusion --dry_run --epoch 600 \
+    --diffusion_model diffusion_models/can_diffusion_model_H1.pt --t_start 10 20
+
+  python evaluation/eval.py --task transport --suite sweep --dry_run --epochs 200,400,600
+
+
+6) Outputs and Result Files
+---------------------------
+For robustness and robustness-diffusion suites, eval.py saves:
+- JSON summary: results/<task>/robustness_eval_<timestamp>.json
+- CSV table:    results/<task>/<task-specific-prefix>_<timestamp>.csv
+
+Current CSV prefixes:
+- can:    robustness_eval_can
+- lift:   robustness_eval_lift
+- square: robustness_eval_square
+
+For filter-sweep suites (can/lift):
+- CSV: results/<task>/filter_sweep_<task>_<timestamp>.csv
+
+For robustness-video suites:
+- MP4(s) saved under results/<task>/
+
+Transport sweep currently prints ranked summary to console.
+
+
+7) Migration Status
+-------------------
+Migration is complete: evaluation execution is centralized in eval.py.
+Legacy per-suite evaluation scripts were removed.
+
+
+8) Recommended Usage Workflow
+-----------------------------
+Step 1: list suites with --list.
+Step 2: test with --dry_run.
+Step 3: run full evaluation.
+Step 4: check results/<task>/ for CSV/JSON/MP4 outputs.
+
+
+9) Troubleshooting
+------------------
+- "robomimic package not found": activate correct conda/env.
+- No checkpoint found: verify --epoch and checkpoint directories.
+- Vision/offscreen render errors: try --render_gpu_id <id>.
+- Need to inspect what would happen without running: add --dry_run.
+
+
+10) One-Liner Quick Start
+-------------------------
+List available task/suite combos:
+
+  python evaluation/eval.py --list
+
+Then run:
+
+  python evaluation/eval.py --task <task> --suite <suite> [args]

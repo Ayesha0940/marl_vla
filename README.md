@@ -156,6 +156,44 @@ Replace:
 state_vec = flatten_obs(obs, obs_keys)
 denoised  = diffusion_denoise_action(noisy_action, state_vec, t_start)
 ```
+
+## Evaluation
+
+Use the unified launcher:
+
+```bash
+python evaluation/eval.py --list
+python evaluation/eval.py --task <task> --suite <suite> [args]
+```
+
+### Task/Suite matrix
+
+| Task | Suites |
+|---|---|
+| can | standard, filters, robustness, robustness-diffusion, robustness-video |
+| lift | standard, filters, kalman, robustness, robustness-diffusion, robustness-video |
+| square | filters, filters-transformer, robustness-diffusion, robustness-video |
+| transport | standard, sweep |
+
+### Examples
+
+```bash
+# Standard policy eval
+python evaluation/eval.py --task can --suite standard --epoch 600 --n_rollouts 50
+
+# Robustness with diffusion (t_start sweep)
+python evaluation/eval.py --task lift --suite robustness-diffusion \
+  --diffusion_model diffusion_models/lift_diffusion_model_H1.pt --t_start 10 20 40
+
+# Square robustness video evaluation
+python evaluation/eval.py --task square --suite robustness-video --epoch 2000
+
+# Transport sweep with extra suite-specific flags
+python evaluation/eval.py --task transport --suite sweep -- --max_runs 5
+```
+
+Note: if a suite supports additional flags not listed by `evaluation/eval.py --help`,
+append them after `--` to pass through to the underlying script.
 With:
 ```python
 cond_vec = build_cond_vec(obs, obs_keys, cond_mode)
