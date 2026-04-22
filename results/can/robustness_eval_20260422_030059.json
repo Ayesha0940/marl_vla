@@ -1,0 +1,542 @@
+{
+    "results": [
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.9,
+            "success_rate": 0.9,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.54,
+            "success_rate": 0.54,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.5,
+            "success_rate": 0.5,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.1,
+            "mean_reward": 0.54,
+            "success_rate": 0.54,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.36,
+            "success_rate": 0.36,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.46,
+            "success_rate": 0.46,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.5,
+            "success_rate": 0.5,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.2,
+            "mean_reward": 0.66,
+            "success_rate": 0.66,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.08,
+            "success_rate": 0.08,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.42,
+            "success_rate": 0.42,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.3,
+            "mean_reward": 0.44,
+            "success_rate": 0.44,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.04,
+            "success_rate": 0.04,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.48,
+            "success_rate": 0.48,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.4,
+            "mean_reward": 0.62,
+            "success_rate": 0.62,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.5,
+            "success_rate": 0.5,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.56,
+            "success_rate": 0.56,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.5,
+            "mean_reward": 0.58,
+            "success_rate": 0.58,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.46,
+            "success_rate": 0.46,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.58,
+            "success_rate": 0.58,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.6,
+            "mean_reward": 0.6,
+            "success_rate": 0.6,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.7,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.7,
+            "mean_reward": 0.46,
+            "success_rate": 0.46,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.7,
+            "mean_reward": 0.6,
+            "success_rate": 0.6,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.7,
+            "mean_reward": 0.58,
+            "success_rate": 0.58,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.8,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.8,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.8,
+            "mean_reward": 0.48,
+            "success_rate": 0.48,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.8,
+            "mean_reward": 0.44,
+            "success_rate": 0.44,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 0.9,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 0.9,
+            "mean_reward": 0.3,
+            "success_rate": 0.3,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 0.9,
+            "mean_reward": 0.46,
+            "success_rate": 0.46,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 0.9,
+            "mean_reward": 0.56,
+            "success_rate": 0.56,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 1.0,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 1.0,
+            "mean_reward": 0.3,
+            "success_rate": 0.3,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 1.0,
+            "mean_reward": 0.54,
+            "success_rate": 0.54,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 1.0,
+            "mean_reward": 0.42,
+            "success_rate": 0.42,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 1.25,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 1.25,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 1.25,
+            "mean_reward": 0.5,
+            "success_rate": 0.5,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 1.25,
+            "mean_reward": 0.44,
+            "success_rate": 0.44,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 1.5,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 1.5,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 1.5,
+            "mean_reward": 0.56,
+            "success_rate": 0.56,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 1.5,
+            "mean_reward": 0.44,
+            "success_rate": 0.44,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 1.75,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 1.75,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 1.75,
+            "mean_reward": 0.44,
+            "success_rate": 0.44,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 1.75,
+            "mean_reward": 0.5,
+            "success_rate": 0.5,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        },
+        {
+            "noise_std": 2.0,
+            "mean_reward": 0.0,
+            "success_rate": 0.0,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "none",
+            "t_start": null
+        },
+        {
+            "noise_std": 2.0,
+            "mean_reward": 0.3,
+            "success_rate": 0.3,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=30]",
+            "t_start": 30
+        },
+        {
+            "noise_std": 2.0,
+            "mean_reward": 0.4,
+            "success_rate": 0.4,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=35]",
+            "t_start": 35
+        },
+        {
+            "noise_std": 2.0,
+            "mean_reward": 0.46,
+            "success_rate": 0.46,
+            "n_rollouts": 50,
+            "seed": 0,
+            "method": "diffusion[t=40]",
+            "t_start": 40
+        }
+    ],
+    "config": {
+        "epoch": 600,
+        "n_rollouts": 50,
+        "horizon": 400,
+        "seed": 0,
+        "noise_levels": [
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            1.0,
+            1.25,
+            1.5,
+            1.75,
+            2.0
+        ],
+        "methods": [
+            "none",
+            "diffusion[t=30]",
+            "diffusion[t=35]",
+            "diffusion[t=40]"
+        ],
+        "diffusion_model": "diffusion_models/can_diffusion_model_state_vision.pt",
+        "t_start": [
+            30,
+            35,
+            40
+        ]
+    }
+}
