@@ -69,7 +69,7 @@ DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "results", "lift", "joint_denois
 
 # Noise grid from the spec
 DEFAULT_ALPHA_A = [0.05, 0.1, 0.2]
-DEFAULT_ALPHA_S = [0.01, 0.05]
+DEFAULT_ALPHA_S = [0.01, 0.02, 0.03, 0.04, 0.05]
 
 
 # ── Environment / policy loading ───────────────────────────────────────────────
@@ -411,198 +411,120 @@ def _eval_grid(
     policy,
     env,
     obs_keys: list,
-    joint_ckpt: Optional[str],
+    joint_ckpts: list,        # list of checkpoint paths, one per anchor
+    t_starts: list,           # list of int
     alpha_s_list: list,
     alpha_a_list: list,
     n_rollouts: int,
-    t_start: int,
     episode_horizon: int,
     base_seed: int,
     device,
-) -> list:
+) -> dict:
     """
-    Sweep (alpha_s × alpha_a) grid and return list of result dicts.
-    Seeds are fixed per (alpha_s, alpha_a, rollout_index) tuple.
+    Sweep (alpha_s × alpha_a) grid across all (checkpoint × t_start) combos.
+
+    Returns a dict:
+        results[(alpha_s, alpha_a)][col_name] = success_rate
+    where col_name is e.g. "A0(t=10)".
     """
-    import torch
+    # Load all checkpoints upfront
+    models = []
+    for ckpt_path in joint_ckpts:
+        m, anc, alps, alps_bar, norm, H, Ds, Da, gk = _load_joint_model(ckpt_path, device)
+        import torch
+        anchor_id = str(torch.load(ckpt_path, map_location="cpu", weights_only=False).get("anchor_id", "?"))
+        models.append((m, anc, alps, alps_bar, norm, H, Ds, Da, gk, anchor_id))
 
-    # Load joint denoiser if provided
-    joint_available = joint_ckpt is not None and os.path.isfile(joint_ckpt)
-    if joint_available:
-        model, anchor, alphas, alphas_bar, norm, horizon_H, state_dim, action_dim, gripper_k = (
-            _load_joint_model(joint_ckpt, device)
-        )
-    else:
-        print("[WARNING] No joint_ckpt provided or file not found — skipping JOINT evaluation.")
+    col_names = [f"{anchor_id}(t={t})" for (_, _, _, _, _, _, _, _, _, anchor_id) in models
+                 for t in t_starts]
+    results = {}
 
-    results = []
-
-    # ── BASE-clean: run once (independent of noise grid) ──────────────────────
-    print("\n[BASE-clean] running ...")
-    clean_rewards, clean_successes = [], []
-    for i in range(n_rollouts):
-        seed = base_seed + i
-        env.reset()   # re-seed env each rollout by reset
-        r, s = _run_rollout_clean(policy, env, episode_horizon, seed)
-        clean_rewards.append(r)
-        clean_successes.append(s)
-    clean_sr = float(np.mean(clean_successes))
-    print(f"  success_rate={clean_sr:.3f}")
-    results.append({
-        "method": "BASE-clean",
-        "alpha_s": 0.0,
-        "alpha_a": 0.0,
-        "success_rate": clean_sr,
-        "mean_reward": float(np.mean(clean_rewards)),
-        "n_rollouts": n_rollouts,
-        "latency_ms": None,
-    })
-
-    # ── Grid sweep ─────────────────────────────────────────────────────────────
     total_cells = len(alpha_s_list) * len(alpha_a_list)
     cell_idx = 0
 
     for alpha_s in alpha_s_list:
         for alpha_a in alpha_a_list:
             cell_idx += 1
+            key = (f"{alpha_s:.3f}", f"{alpha_a:.3f}")
+            results[key] = {}
             print(f"\n[Cell {cell_idx}/{total_cells}] alpha_s={alpha_s:.3f}  alpha_a={alpha_a:.3f}")
 
-            # BASE-noisy
-            noisy_rewards, noisy_successes = [], []
-            for i in range(n_rollouts):
-                # unique seed per (alpha_s, alpha_a, rollout)
-                seed = base_seed + int(alpha_s * 1000) + int(alpha_a * 1000) * 1000 + i
-                env.reset()
-                r, s = _run_rollout_noisy(
-                    policy, env, obs_keys, alpha_s, alpha_a, episode_horizon, seed
-                )
-                noisy_rewards.append(r)
-                noisy_successes.append(s)
-            noisy_sr = float(np.mean(noisy_successes))
-            print(f"  BASE-noisy  success_rate={noisy_sr:.3f}")
-            results.append({
-                "method": "BASE-noisy",
-                "alpha_s": alpha_s,
-                "alpha_a": alpha_a,
-                "success_rate": noisy_sr,
-                "mean_reward": float(np.mean(noisy_rewards)),
-                "n_rollouts": n_rollouts,
-                "latency_ms": None,
-            })
+            for (model, anchor, alphas, alphas_bar, norm,
+                 horizon_H, state_dim, action_dim, gripper_k, anchor_id) in models:
+                for t_start in t_starts:
+                    col = f"{anchor_id}(t={t_start})"
+                    joint_successes, joint_lats = [], []
+                    for i in range(n_rollouts):
+                        seed = base_seed + int(alpha_s * 1000) + int(alpha_a * 1000) * 1000 + i
+                        env.reset()
+                        _, s, lat = _run_rollout_joint(
+                            policy, env, obs_keys,
+                            model, anchor, alphas, alphas_bar, norm,
+                            horizon_H, state_dim, action_dim,
+                            alpha_s, alpha_a, t_start, episode_horizon, seed,
+                            gripper_k=gripper_k,
+                        )
+                        joint_successes.append(s)
+                        joint_lats.append(lat)
+                    sr  = float(np.mean(joint_successes))
+                    lat = float(np.mean(joint_lats))
+                    results[key][col] = sr
+                    print(f"  {col:15s}  success_rate={sr:.4f}  latency={lat:.1f}ms")
 
-            # JOINT-Ax
-            if joint_available:
-                joint_rewards, joint_successes, joint_lats = [], [], []
-                for i in range(n_rollouts):
-                    seed = base_seed + int(alpha_s * 1000) + int(alpha_a * 1000) * 1000 + i
-                    env.reset()
-                    r, s, lat = _run_rollout_joint(
-                        policy, env, obs_keys,
-                        model, anchor, alphas, alphas_bar, norm,
-                        horizon_H, state_dim, action_dim,
-                        alpha_s, alpha_a, t_start, episode_horizon, seed,
-                        gripper_k=gripper_k,
-                    )
-                    joint_rewards.append(r)
-                    joint_successes.append(s)
-                    joint_lats.append(lat)
-                joint_sr  = float(np.mean(joint_successes))
-                joint_lat = float(np.mean(joint_lats))
-                anchor_id = str(torch.load(joint_ckpt, map_location="cpu", weights_only=False).get("anchor_id", "?"))
-                print(f"  JOINT-{anchor_id}    success_rate={joint_sr:.3f}  latency={joint_lat:.1f}ms")
-                results.append({
-                    "method": f"JOINT-{anchor_id}",
-                    "alpha_s": alpha_s,
-                    "alpha_a": alpha_a,
-                    "success_rate": joint_sr,
-                    "mean_reward": float(np.mean(joint_rewards)),
-                    "n_rollouts": n_rollouts,
-                    "latency_ms": joint_lat,
-                })
-
-    return results
+    return results, col_names
 
 
 # ── Results I/O ────────────────────────────────────────────────────────────────
 
-def _save_results(results: list, output_dir: str, anchor_id: str, t_start: int):
-    os.makedirs(output_dir, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    csv_path  = os.path.join(output_dir, f"joint_{anchor_id}_tstart{t_start}_{ts}.csv")
-
-    header = "method,alpha_s,alpha_a,success_rate,mean_reward,n_rollouts,latency_ms"
-    rows   = []
-    for r in results:
-        lat = f"{r['latency_ms']:.2f}" if r["latency_ms"] is not None else ""
-        rows.append(
-            f"{r['method']},{r['alpha_s']:.3f},{r['alpha_a']:.3f},"
-            f"{r['success_rate']:.4f},{r['mean_reward']:.4f},"
-            f"{r['n_rollouts']},{lat}"
-        )
-    with open(csv_path, "w") as f:
-        f.write(header + "\n")
-        f.write("\n".join(rows) + "\n")
-
-    print(f"\nResults saved:\n  CSV: {csv_path}")
-    return csv_path
+def _save_results(results: dict, col_names: list, output_csv: str):
+    """Write pivot CSV: rows = (alpha_s, alpha_a), cols = anchor(t=X) combos."""
+    import csv
+    os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
+    header = ["alpha_s", "alpha_a"] + col_names
+    with open(output_csv, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        for (a_s, a_a), vals in sorted(results.items(), key=lambda x: (float(x[0][0]), float(x[0][1]))):
+            row = {"alpha_s": a_s, "alpha_a": a_a}
+            for col in col_names:
+                v = vals.get(col)
+                row[col] = f"{v:.4f}" if v is not None else ""
+            writer.writerow(row)
+    print(f"\nSaved: {output_csv}  ({len(results)} rows × {len(col_names)} anchor columns)")
 
 
-def _print_summary(results: list):
-    methods = sorted({r["method"] for r in results})
-    alpha_s_vals = sorted({r["alpha_s"] for r in results})
-    alpha_a_vals = sorted({r["alpha_a"] for r in results})
-
-    for method in methods:
-        print(f"\n{'─'*60}")
-        print(f"  {method}")
-        print(f"{'─'*60}")
-        col_header = "alpha_s \\ alpha_a"
-        header = f"{col_header:>18}" + "".join(f"  {a:.2f}" for a in alpha_a_vals)
-        print(header)
-        for as_ in alpha_s_vals:
-            row = f"{as_:>10.3f}"
-            for aa in alpha_a_vals:
-                match = [r for r in results
-                         if r["method"] == method
-                         and abs(r["alpha_s"] - as_) < 1e-6
-                         and abs(r["alpha_a"] - aa) < 1e-6]
-                row += f"  {match[0]['success_rate']:.2f}" if match else "    —  "
-            print(row)
+def _print_summary(results: dict, col_names: list):
+    print(f"\n{'alpha_s':>8}  {'alpha_a':>8}" + "".join(f"  {c:>14}" for c in col_names))
+    print("─" * (20 + 16 * len(col_names)))
+    for (a_s, a_a), vals in sorted(results.items(), key=lambda x: (float(x[0][0]), float(x[0][1]))):
+        row = f"{float(a_s):>8.3f}  {float(a_a):>8.3f}"
+        for col in col_names:
+            v = vals.get(col)
+            row += f"  {v:>14.4f}" if v is not None else f"  {'—':>14}"
+        print(row)
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--bc_rnn_ckpt",  default=DEFAULT_BC_CKPT,
-                   help="Path to BC-RNN lift epoch-600 checkpoint.")
-    p.add_argument("--joint_ckpt",   default=None,
-                   help="Path to trained JointUNet1D checkpoint (.pt). "
-                        "If omitted, only baselines are evaluated.")
-    p.add_argument("--anchor",       default="A1",
-                   help="Anchor ID for labelling (must match checkpoint). Default A1.")
-    p.add_argument("--alpha_s",      default=",".join(str(v) for v in DEFAULT_ALPHA_S),
-                   help=f"Comma-separated state noise stds. Default: {DEFAULT_ALPHA_S}")
-    p.add_argument("--alpha_a",      default=",".join(str(v) for v in DEFAULT_ALPHA_A),
-                   help=f"Comma-separated action noise stds. Default: {DEFAULT_ALPHA_A}")
-    p.add_argument("--n_rollouts",   type=int, default=50,
-                   help="Rollouts per noise cell. Default 50.")
-    p.add_argument("--t_start",      type=int, default=20,
-                   help="Reverse diffusion start step. Default 20.")
-    p.add_argument("--episode_horizon", type=int, default=400,
-                   help="Max env steps per episode. Default 400.")
-    p.add_argument("--seed",         type=int, default=42,
-                   help="Base random seed. Default 42.")
-    p.add_argument("--output_dir",   default=DEFAULT_OUTPUT_DIR,
-                   help="Directory to write CSV results.")
-    p.add_argument("--device",       default="auto",
-                   help="'auto', 'cuda', or 'cpu'. Default auto.")
+    p.add_argument("--bc_rnn_ckpt",  default=DEFAULT_BC_CKPT)
+    p.add_argument("--joint_ckpts",  nargs="+", required=True,
+                   help="One checkpoint per anchor, e.g.: ckpt_a0.pt ckpt_a2.pt ckpt_a7.pt")
+    p.add_argument("--t_starts",     nargs="+", type=int, default=[10],
+                   help="Reverse diffusion start steps. Default: 10")
+    p.add_argument("--alpha_s",      default=",".join(str(v) for v in DEFAULT_ALPHA_S))
+    p.add_argument("--alpha_a",      default=",".join(str(v) for v in DEFAULT_ALPHA_A))
+    p.add_argument("--n_rollouts",   type=int, default=25)
+    p.add_argument("--episode_horizon", type=int, default=400)
+    p.add_argument("--seed",         type=int, default=42)
+    p.add_argument("--output_csv",   required=True,
+                   help="Output CSV path, e.g. results/lift/joint_denoiser/baseline_results.csv")
+    p.add_argument("--device",       default="auto")
     return p.parse_args()
 
 
 def _configure_mujoco():
-    """Set LD_LIBRARY_PATH for MuJoCo/NVIDIA libs."""
     paths = [
         os.path.expanduser("~/.mujoco/mujoco210/bin"),
         "/usr/lib/x86_64-linux-gnu",
@@ -622,45 +544,37 @@ def main():
     alpha_s_list = [float(x) for x in args.alpha_s.split(",")]
     alpha_a_list = [float(x) for x in args.alpha_a.split(",")]
 
+    import torch
     device_str = args.device
-    if device_str == "auto":
-        import torch
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device(device_str)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") \
+             if device_str == "auto" else torch.device(device_str)
 
-    print(f"Device: {device}")
-    print(f"BC-RNN checkpoint: {args.bc_rnn_ckpt}")
-    print(f"Joint checkpoint:  {args.joint_ckpt}")
-    print(f"Anchor:            {args.anchor}")
-    print(f"State noise α_s:   {alpha_s_list}")
-    print(f"Action noise α_a:  {alpha_a_list}")
-    print(f"Rollouts per cell: {args.n_rollouts}")
-    print(f"t_start:           {args.t_start}")
+    print(f"Device:       {device}")
+    print(f"Checkpoints:  {args.joint_ckpts}")
+    print(f"t_starts:     {args.t_starts}")
+    print(f"α_s grid:     {alpha_s_list}")
+    print(f"α_a grid:     {alpha_a_list}")
+    print(f"Rollouts/cell:{args.n_rollouts}")
 
     policy, env, ckpt_dict = _load_policy_and_env(args.bc_rnn_ckpt, device_str)
+    obs_keys = list(ckpt_dict["shape_metadata"]["all_obs_keys"])
 
-    sm = ckpt_dict["shape_metadata"]
-    obs_keys = sm["all_obs_keys"]
-    print(f"\nObs keys: {obs_keys}")
-    print(f"State dim: {sum(sm['all_shapes'][k][0] for k in obs_keys)}  Action dim: {sm['ac_dim']}")
-
-    results = _eval_grid(
+    results, col_names = _eval_grid(
         policy         = policy,
         env            = env,
         obs_keys       = obs_keys,
-        joint_ckpt     = args.joint_ckpt,
+        joint_ckpts    = args.joint_ckpts,
+        t_starts       = args.t_starts,
         alpha_s_list   = alpha_s_list,
         alpha_a_list   = alpha_a_list,
         n_rollouts     = args.n_rollouts,
-        t_start        = args.t_start,
         episode_horizon= args.episode_horizon,
         base_seed      = args.seed,
         device         = device,
     )
 
-    _print_summary(results)
-    _save_results(results, args.output_dir, anchor_id=args.anchor, t_start=args.t_start)
+    _print_summary(results, col_names)
+    _save_results(results, col_names, args.output_csv)
 
 
 if __name__ == "__main__":

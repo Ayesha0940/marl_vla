@@ -4,6 +4,7 @@ datasets/
 # Model checkpoints and saved models
 checkpoints/
 models/
+diffusion_models/
 
 # Logs and results
 logs/

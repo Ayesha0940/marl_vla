@@ -250,22 +250,30 @@ def joint_diffusion_loss(
     anchor_emb: torch.Tensor,
     alphas_bar: torch.Tensor,
     lam: float = None,
+    x0_state_clean: torch.Tensor = None,
+    x0_action_clean: torch.Tensor = None,
 ) -> tuple:
     """
-    Two-component DDPM loss (generalizes Eq. 13):
+    Two-component DDPM loss with optional noise-augmented warm-start training.
 
         L = ‖ε^a − ε̂^a‖² + λ · ‖ε^s − ε̂^s‖²
 
-    λ defaults to D_a / D_s to equalize per-dimension contribution.
-    Log loss_a and loss_s separately as per the spec.
+    When x0_state_clean / x0_action_clean are provided (noise-augmented mode):
+      - Forward process runs from the NOISY x0 (x0_state / x0_action)
+      - The eps TARGET is computed so that the reverse process recovers the CLEAN x0
+      - This teaches the model to denoise deployment-corrupted inputs back to clean
+
+    When clean tensors are omitted, falls back to standard DDPM (x0 = clean).
 
     Args:
-        model:      JointUNet1D
-        x0_state:   (B, H, D_s) — clean normalized state windows
-        x0_action:  (B, H, D_a) — clean normalized action windows
-        anchor_emb: (B, D_c)    — from anchor.compute(traj_batch)
-        alphas_bar: (T,)        — cumulative alphas from make_beta_schedule
-        lam:        loss weight for state term; None → D_a / D_s
+        model:           JointUNet1D
+        x0_state:        (B, H, D_s) — noisy state (forward process start)
+        x0_action:       (B, H, D_a) — noisy action (forward process start)
+        anchor_emb:      (B, D_c)    — from anchor.compute(traj_batch)
+        alphas_bar:      (T,)        — cumulative alphas from make_beta_schedule
+        lam:             loss weight for state term; None → D_a / D_s
+        x0_state_clean:  (B, H, D_s) — clean target; if None uses x0_state
+        x0_action_clean: (B, H, D_a) — clean target; if None uses x0_action
 
     Returns:
         (total_loss, loss_a, loss_s)
@@ -273,19 +281,30 @@ def joint_diffusion_loss(
     if lam is None:
         lam = model.action_dim / model.state_dim
 
-    B = x0_state.shape[0]
-    T = alphas_bar.shape[0]
+    B      = x0_state.shape[0]
+    T      = alphas_bar.shape[0]
     device = x0_state.device
+    ab     = alphas_bar.to(device)
 
-    x0  = torch.cat([x0_state, x0_action], dim=-1)   # (B, H, D_s+D_a)
-    t   = torch.randint(0, T, (B,), device=device)
-    eps = torch.randn_like(x0)
-    x_t = q_sample(x0, t, eps, alphas_bar.to(device))
+    x0_fwd = torch.cat([x0_state, x0_action], dim=-1)          # (B, H, D) — noisy forward start
+    t      = torch.randint(0, T, (B,), device=device)
+    eps    = torch.randn_like(x0_fwd)
+    x_t    = q_sample(x0_fwd, t, eps, ab)                       # (B, H, D)
+
+    if x0_state_clean is not None and x0_action_clean is not None:
+        # Compute eps that takes x_t back to the CLEAN x0, not the noisy x0.
+        # x_t = sqrt(abar_t)*x0_noisy + sqrt(1-abar_t)*eps_fwd
+        # eps_clean = (x_t - sqrt(abar_t)*x0_clean) / sqrt(1-abar_t)
+        x0_clean = torch.cat([x0_state_clean, x0_action_clean], dim=-1)
+        abar_t   = ab[t].reshape(B, 1, 1)                       # (B, 1, 1)
+        eps_target = (x_t - abar_t.sqrt() * x0_clean) / (1.0 - abar_t).sqrt()
+    else:
+        eps_target = eps
 
     eps_s_hat, eps_a_hat = model.predict_noise(x_t, anchor_emb, t)
 
-    loss_a = F.mse_loss(eps_a_hat, eps[..., model.state_dim:])
-    loss_s = F.mse_loss(eps_s_hat, eps[..., :model.state_dim])
+    loss_a = F.mse_loss(eps_a_hat, eps_target[..., model.state_dim:])
+    loss_s = F.mse_loss(eps_s_hat, eps_target[..., :model.state_dim])
     total  = loss_a + lam * loss_s
 
     return total, loss_a, loss_s

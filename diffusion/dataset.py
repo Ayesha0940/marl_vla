@@ -109,6 +109,9 @@ class JointDenoiserDataset(Dataset):
         gripper_k: int = 5,
         lift_z_thresh: float = 0.85,
         normalize: bool = True,
+        aug_alpha_s_max: float = 0.05,
+        aug_alpha_a_max: float = 0.20,
+        noise_schedule: str = "uniform",
     ):
         self.horizon            = horizon
         self.obs_keys           = obs_keys or self.DEFAULT_OBS_KEYS
@@ -117,6 +120,11 @@ class JointDenoiserDataset(Dataset):
         self.gripper_action_dim = gripper_action_dim
         self.gripper_k          = gripper_k
         self.lift_z_thresh      = lift_z_thresh
+        self.aug_alpha_s_max    = aug_alpha_s_max
+        self.aug_alpha_a_max    = aug_alpha_a_max
+        assert noise_schedule in ("uniform", "asymmetric"), \
+            f"noise_schedule must be 'uniform' or 'asymmetric', got {noise_schedule!r}"
+        self.noise_schedule     = noise_schedule
 
         self._windows: List[dict] = []
         self._load(hdf5_path)
@@ -236,15 +244,33 @@ class JointDenoiserDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         w = self._windows[idx]
 
-        state  = w["state"]
-        action = w["action"]
+        state_clean  = w["state"].copy()
+        action_clean = w["action"].copy()
+
+        # Deployment noise augmentation in raw space (before normalization),
+        # matching how eval corrupts observations before the normalizer.
+        if self.noise_schedule == "asymmetric":
+            # Beta(3,1) concentrates alpha_s near aug_alpha_s_max (mean ≈ 0.75 * max),
+            # biasing toward the high-noise regime [0.03, 0.05] where deployment lives.
+            # alpha_a stays uniform — action noise is already variable at deployment.
+            alpha_s = np.random.beta(3, 1) * self.aug_alpha_s_max
+        else:
+            alpha_s = np.random.uniform(0.0, self.aug_alpha_s_max)
+        alpha_a = np.random.uniform(0.0, self.aug_alpha_a_max)
+        state_noisy  = state_clean  + np.random.randn(*state_clean.shape).astype(np.float32)  * alpha_s
+        action_noisy = action_clean + np.random.randn(*action_clean.shape).astype(np.float32) * alpha_a
+
         if self.state_mean is not None:
-            state  = (state  - self.state_mean)  / self.state_std
-            action = (action - self.action_mean) / self.action_std
+            state_clean  = (state_clean  - self.state_mean)  / self.state_std
+            action_clean = (action_clean - self.action_mean) / self.action_std
+            state_noisy  = (state_noisy  - self.state_mean)  / self.state_std
+            action_noisy = (action_noisy - self.action_mean) / self.action_std
 
         return {
-            "state":           torch.from_numpy(state.copy()),
-            "action":          torch.from_numpy(action.copy()),
+            "state":           torch.from_numpy(state_clean),
+            "action":          torch.from_numpy(action_clean),
+            "state_noisy":     torch.from_numpy(state_noisy),
+            "action_noisy":    torch.from_numpy(action_noisy),
             "object_pose_t0":  torch.from_numpy(w["object_pose_t0"]),
             "gripper_history": torch.from_numpy(w["gripper_history"]),
             "proprio":         torch.from_numpy(w["proprio"]),
