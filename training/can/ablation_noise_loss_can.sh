@@ -20,7 +20,7 @@ cd "${REPO_ROOT}"
 BC_RNN_CKPT="checkpoints/bc_rnn_can/bc_rnn_can/20260405211805/models/model_epoch_600.pth"
 
 ANCHORS=(A0 A2 A3 A7)
-N_ROLLOUTS=50
+N_ROLLOUTS=25
 T_STARTS=(10)
 
 RESULTS_DIR="results/can/joint_denoiser"

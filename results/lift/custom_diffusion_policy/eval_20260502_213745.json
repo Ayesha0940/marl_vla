@@ -1,0 +1,18 @@
+{
+    "results": [
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_final.pt",
+            "success_rate": 0.44,
+            "n_success": 22,
+            "n_rollouts": 50
+        }
+    ],
+    "config": {
+        "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_final.pt",
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth",
+        "n_rollouts": 50,
+        "horizon": 400,
+        "seed": 42,
+        "t_start": null
+    }
+}

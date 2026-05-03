@@ -1,0 +1,16 @@
+{
+    "results": [
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/bc_diffusion_lift/bc_diffusion_lift_20260430_002247/20260430002250/models/model_epoch_500.pth",
+            "success_rate": 0.0,
+            "n_success": 0,
+            "n_rollouts": 50
+        }
+    ],
+    "config": {
+        "checkpoint": "/home/axs0940/marl_vla/checkpoints/bc_diffusion_lift/bc_diffusion_lift_20260430_002247/20260430002250/models/model_epoch_500.pth",
+        "n_rollouts": 50,
+        "horizon": 400,
+        "seed": 0
+    }
+}

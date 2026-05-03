@@ -1,0 +1,96 @@
+{
+    "results": [
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/best_model.pt",
+            "success_rate": 0.52,
+            "n_success": 26,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_1000.pt",
+            "success_rate": 0.64,
+            "n_success": 32,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_1500.pt",
+            "success_rate": 0.38,
+            "n_success": 19,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_2000.pt",
+            "success_rate": 0.24,
+            "n_success": 12,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_2500.pt",
+            "success_rate": 0.4,
+            "n_success": 20,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_3000.pt",
+            "success_rate": 0.52,
+            "n_success": 26,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_3500.pt",
+            "success_rate": 0.52,
+            "n_success": 26,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_4000.pt",
+            "success_rate": 0.5,
+            "n_success": 25,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_4500.pt",
+            "success_rate": 0.48,
+            "n_success": 24,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_500.pt",
+            "success_rate": 0.66,
+            "n_success": 33,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_5000.pt",
+            "success_rate": 0.5,
+            "n_success": 25,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_5500.pt",
+            "success_rate": 0.56,
+            "n_success": 28,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_6000.pt",
+            "success_rate": 0.56,
+            "n_success": 28,
+            "n_rollouts": 50
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_final.pt",
+            "success_rate": 0.56,
+            "n_success": 28,
+            "n_rollouts": 50
+        }
+    ],
+    "config": {
+        "checkpoint_dir": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy",
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth",
+        "n_rollouts": 50,
+        "horizon": 400,
+        "seed": 42,
+        "t_start": null
+    }
+}

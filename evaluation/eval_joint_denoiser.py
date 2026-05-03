@@ -69,7 +69,7 @@ DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "results", "lift", "joint_denois
 
 # Noise grid from the spec
 DEFAULT_ALPHA_A = [0.05, 0.1, 0.2]
-DEFAULT_ALPHA_S = [0.01, 0.02, 0.03, 0.04, 0.05]
+DEFAULT_ALPHA_S = [0.01]
 
 
 # ── Environment / policy loading ───────────────────────────────────────────────
