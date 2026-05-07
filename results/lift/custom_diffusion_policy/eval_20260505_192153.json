@@ -1,0 +1,20 @@
+{
+    "results": [
+        {
+            "checkpoint": "checkpoints/lift_diffusion_policy_v5/best_model.pt",
+            "success_rate": 0.93,
+            "n_success": 186,
+            "n_rollouts": 200
+        }
+    ],
+    "config": {
+        "agent": "checkpoints/lift_diffusion_policy_v5/best_model.pt",
+        "sweep": null,
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260418190845/models/model_epoch_600.pth",
+        "n_rollouts": 200,
+        "horizon": 400,
+        "seed": 0,
+        "t_start": null,
+        "exec_horizon": 8
+    }
+}
