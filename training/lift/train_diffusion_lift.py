@@ -27,7 +27,7 @@ def default_config() -> dict:
         "train": {
             "data": os.path.join(PROJECT_ROOT, "datasets/lift/ph/low_dim_v141.hdf5"),
             "output_dir": os.path.join(PROJECT_ROOT, "checkpoints/lift_diffusion_policy"),
-            "num_epochs": 2000,
+            "num_epochs": 4500,
             "batch_size": 256,
             "num_workers": 2,
             "log_freq": 10,
@@ -40,10 +40,23 @@ def default_config() -> dict:
                 "object",
             ],
             "obs_horizon": 2,
-            "action_horizon": 8,
+            "action_horizon": 16,
+            "backbone": "unet",
+            # UNet (DiffusionPolicy-C)
+            "down_dims": [256, 512, 1024],
+            "kernel_size": 5,
+            "n_groups": 8,
+            "time_emb_dim": 256,
+            # MLP fallback
             "hidden_dim": 512,
-            "time_emb_dim": 128,
             "n_layers": 6,
+            # Transformer (DiffusionPolicy-T)
+            "d_model": 256,
+            "n_heads": 8,
+            "n_enc_layers": 4,
+            "n_dec_layers": 4,
+            "d_ff": 1024,
+            "dropout": 0.1,
         },
         "diffusion": {
             "num_steps": 100,
@@ -80,6 +93,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "cpu"])
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--backbone", type=str, default="unet",
+                    choices=["mlp", "unet", "transformer"])
     return parser.parse_args()
 
 
@@ -114,8 +129,8 @@ def train(config: dict, seed: int = 0, device_arg: str = "auto") -> None:
     device = build_device(device_arg)
     print(f"Device: {device}")
 
-    train_cfg = config["train"]
-    model_cfg = config["model"]
+    train_cfg     = config["train"]
+    model_cfg     = config["model"]
     diffusion_cfg = config["diffusion"]
     optimizer_cfg = config["optimizer"]
 
@@ -136,33 +151,87 @@ def train(config: dict, seed: int = 0, device_arg: str = "auto") -> None:
         pin_memory=(device.type == "cuda"),
     )
 
-    model = LiftDiffusionPolicy(
-        obs_dim=dataset.obs_dim,
-        action_dim=dataset.action_dim,
-        obs_horizon=int(model_cfg["obs_horizon"]),
-        action_horizon=int(model_cfg["action_horizon"]),
-        hidden_dim=int(model_cfg["hidden_dim"]),
-        time_emb_dim=int(model_cfg.get("time_emb_dim", 128)),
-        n_layers=int(model_cfg.get("n_layers", 6)),
-    ).to(device)
+    # ------------------------------------------------------------------
+    # Model construction — backbone selected from config
+    # ------------------------------------------------------------------
+    backbone = model_cfg.get("backbone", "unet")
 
+    if backbone == "unet":
+        from diffusion.lift_policy_unet import UNetDiffusionPolicy, save_unet_checkpoint
+        model = UNetDiffusionPolicy(
+            obs_dim=dataset.obs_dim,
+            action_dim=dataset.action_dim,
+            obs_horizon=int(model_cfg["obs_horizon"]),
+            action_horizon=int(model_cfg["action_horizon"]),
+            down_dims=list(model_cfg.get("down_dims", [256, 512, 1024])),
+            kernel_size=int(model_cfg.get("kernel_size", 5)),
+            n_groups=int(model_cfg.get("n_groups", 8)),
+            time_emb_dim=int(model_cfg.get("time_emb_dim", 256)),
+        ).to(device)
+        save_fn = save_unet_checkpoint
+
+    elif backbone == "transformer":
+        from diffusion.lift_policy_transformer import (
+            TransformerDiffusionPolicy,
+            save_transformer_checkpoint,
+        )
+        model = TransformerDiffusionPolicy(
+            obs_dim=dataset.obs_dim,
+            action_dim=dataset.action_dim,
+            obs_horizon=int(model_cfg["obs_horizon"]),
+            action_horizon=int(model_cfg["action_horizon"]),
+            d_model=int(model_cfg.get("d_model", 256)),
+            n_heads=int(model_cfg.get("n_heads", 8)),
+            n_enc_layers=int(model_cfg.get("n_enc_layers", 4)),
+            n_dec_layers=int(model_cfg.get("n_dec_layers", 4)),
+            d_ff=int(model_cfg.get("d_ff", 1024)),
+            dropout=float(model_cfg.get("dropout", 0.1)),
+            time_emb_dim=int(model_cfg.get("time_emb_dim", 256)),
+        ).to(device)
+        save_fn = save_transformer_checkpoint
+
+    else:  # mlp
+        from diffusion.lift_policy import LiftDiffusionPolicy
+        model = LiftDiffusionPolicy(
+            obs_dim=dataset.obs_dim,
+            action_dim=dataset.action_dim,
+            obs_horizon=int(model_cfg["obs_horizon"]),
+            action_horizon=int(model_cfg["action_horizon"]),
+            hidden_dim=int(model_cfg["hidden_dim"]),
+            time_emb_dim=int(model_cfg.get("time_emb_dim", 128)),
+            n_layers=int(model_cfg.get("n_layers", 6)),
+        ).to(device)
+        save_fn = None  # MLP uses inline torch.save below
+
+    print(f"Backbone: {backbone}  |  params: {sum(p.numel() for p in model.parameters()):,}")
+
+    # ------------------------------------------------------------------
+    # Diffusion schedule
+    # ------------------------------------------------------------------
     betas, alphas, alphas_bar = make_beta_schedule(
         int(diffusion_cfg["num_steps"]),
         float(diffusion_cfg.get("beta_start", 1e-4)),
-        float(diffusion_cfg.get("beta_end", 2e-2)),
+        float(diffusion_cfg.get("beta_end",   2e-2)),
     )
     alphas_bar = alphas_bar.to(device)
 
+    # ------------------------------------------------------------------
+    # Optimizer, EMA, scheduler
+    # ------------------------------------------------------------------
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(optimizer_cfg["lr"]),
         weight_decay=float(optimizer_cfg.get("weight_decay", 0.0)),
     )
-    
-    ema_model = AveragedModel(model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
+
+    ema_model = AveragedModel(
+        model,
+        multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999),
+    )
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=1000,      # restart every 1000 epochs
+        T_0=1000,
         T_mult=1,
         eta_min=1e-6,
     )
@@ -173,124 +242,149 @@ def train(config: dict, seed: int = 0, device_arg: str = "auto") -> None:
     print(f"  action_dim:       {dataset.action_dim}")
     print(f"  obs_horizon:      {model_cfg['obs_horizon']}")
     print(f"  action_horizon:   {model_cfg['action_horizon']}")
-    print(f"  diffusion_steps:   {diffusion_cfg['num_steps']}")
+    print(f"  diffusion_steps:  {diffusion_cfg['num_steps']}")
     print(f"  epochs:           {train_cfg['num_epochs']}")
     print(f"  batch_size:       {train_cfg['batch_size']}")
     print(f"  output_dir:       {train_cfg['output_dir']}")
 
     best_loss = float("inf")
-    best_path = os.path.join(train_cfg["output_dir"], "best_model.pt")
+    best_path  = os.path.join(train_cfg["output_dir"], "best_model.pt")
+    final_path = os.path.join(train_cfg["output_dir"], "model_final.pt")
 
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
     for epoch in range(1, int(train_cfg["num_epochs"]) + 1):
         model.train()
         epoch_loss = 0.0
-        n_batches = 0
+        n_batches  = 0
 
         for batch in loader:
-            obs_batch = batch["obs"].to(device)
+            obs_batch    = batch["obs"].to(device)
             action_batch = batch["action"].to(device)
-            batch_size = action_batch.shape[0]
+            batch_size   = action_batch.shape[0]
 
-            timesteps = torch.randint(0, int(diffusion_cfg["num_steps"]), (batch_size,), device=device)
-            noise = torch.randn_like(action_batch)
+            timesteps     = torch.randint(0, int(diffusion_cfg["num_steps"]), (batch_size,), device=device)
+            noise         = torch.randn_like(action_batch)
             noisy_actions = q_sample(action_batch, timesteps, noise, alphas_bar)
             predicted_noise = model(noisy_actions, timesteps, obs_batch)
             loss = torch.nn.functional.mse_loss(predicted_noise, noise)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             ema_model.update_parameters(model)
 
             epoch_loss += float(loss.item())
-            n_batches += 1
+            n_batches  += 1
 
         scheduler.step()
+        epoch_loss /= max(n_batches, 1)
 
+        # --------------------------------------------------------------
+        # Periodic checkpoint (every 500 epochs)
+        # --------------------------------------------------------------
         if epoch % 500 == 0:
             print(f"Saving checkpoint at epoch {epoch}...")
             epoch_path = os.path.join(train_cfg["output_dir"], f"model_epoch_{epoch}.pt")
-            torch.save({
-                "model_state_dict": ema_model.module.state_dict(),
-                "obs_dim": dataset.obs_dim,
-                "action_dim": dataset.action_dim,
-                "obs_horizon": int(model_cfg["obs_horizon"]),
-                "action_horizon": int(model_cfg["action_horizon"]),
-                "hidden_dim": int(model_cfg["hidden_dim"]),
-                "time_emb_dim": int(model_cfg.get("time_emb_dim", 128)),
-                "n_layers": int(model_cfg.get("n_layers", 6)),
-                "diffusion_steps": int(diffusion_cfg["num_steps"]),
-                "beta_start": float(diffusion_cfg.get("beta_start", 1e-4)),
-                "beta_end": float(diffusion_cfg.get("beta_end", 2e-2)),
-                "obs_keys": list(model_cfg.get("obs_keys", [])),
-                "obs_mean": dataset.obs_mean,
-                "obs_std": dataset.obs_std,
-                "action_mean": dataset.action_mean,
-                "action_std": dataset.action_std,
-                "config": config,
-                "epoch": epoch,
-                "loss": epoch_loss,
-            }, epoch_path)
+            if save_fn is not None:
+                save_fn(epoch_path, ema_model.module, dataset, config, epoch, epoch_loss)
+            else:
+                # MLP inline save
+                torch.save(
+                    {
+                        "model_state_dict": ema_model.module.state_dict(),
+                        "obs_dim":          dataset.obs_dim,
+                        "action_dim":       dataset.action_dim,
+                        "obs_horizon":      int(model_cfg["obs_horizon"]),
+                        "action_horizon":   int(model_cfg["action_horizon"]),
+                        "hidden_dim":       int(model_cfg["hidden_dim"]),
+                        "time_emb_dim":     int(model_cfg.get("time_emb_dim", 128)),
+                        "n_layers":         int(model_cfg.get("n_layers", 6)),
+                        "diffusion_steps":  int(diffusion_cfg["num_steps"]),
+                        "beta_start":       float(diffusion_cfg.get("beta_start", 1e-4)),
+                        "beta_end":         float(diffusion_cfg.get("beta_end",   2e-2)),
+                        "obs_keys":         list(model_cfg.get("obs_keys", [])),
+                        "obs_mean":         dataset.obs_mean,
+                        "obs_std":          dataset.obs_std,
+                        "action_mean":      dataset.action_mean,
+                        "action_std":       dataset.action_std,
+                        "config":           config,
+                        "epoch":            epoch,
+                        "loss":             epoch_loss,
+                    },
+                    epoch_path,
+                )
 
-        epoch_loss /= max(n_batches, 1)
-
+        # --------------------------------------------------------------
+        # Best checkpoint (by training loss)
+        # --------------------------------------------------------------
         if epoch_loss < best_loss:
             best_loss = epoch_loss
-            torch.save(
-                {
-                    "model_state_dict": ema_model.module.state_dict(),
-                    "obs_dim": dataset.obs_dim,
-                    "action_dim": dataset.action_dim,
-                    "obs_horizon": int(model_cfg["obs_horizon"]),
-                    "action_horizon": int(model_cfg["action_horizon"]),
-                    "hidden_dim": int(model_cfg["hidden_dim"]),
-                    "time_emb_dim": int(model_cfg.get("time_emb_dim", 128)),
-                    "diffusion_steps": int(diffusion_cfg["num_steps"]),
-                    "beta_start": float(diffusion_cfg.get("beta_start", 1e-4)),
-                    "beta_end": float(diffusion_cfg.get("beta_end", 2e-2)),
-                    "obs_keys": list(model_cfg.get("obs_keys", [])),
-                    "obs_mean": dataset.obs_mean,
-                    "obs_std": dataset.obs_std,
-                    "action_mean": dataset.action_mean,
-                    "action_std": dataset.action_std,
-                    "config": config,
-                    "epoch": epoch,
-                    "loss": epoch_loss,
-                    "n_layers": int(model_cfg.get("n_layers", 6)),
-                },
-                best_path,
-            )
+            if save_fn is not None:
+                save_fn(best_path, ema_model.module, dataset, config, epoch, epoch_loss)
+            else:
+                torch.save(
+                    {
+                        "model_state_dict": ema_model.module.state_dict(),
+                        "obs_dim":          dataset.obs_dim,
+                        "action_dim":       dataset.action_dim,
+                        "obs_horizon":      int(model_cfg["obs_horizon"]),
+                        "action_horizon":   int(model_cfg["action_horizon"]),
+                        "hidden_dim":       int(model_cfg["hidden_dim"]),
+                        "time_emb_dim":     int(model_cfg.get("time_emb_dim", 128)),
+                        "n_layers":         int(model_cfg.get("n_layers", 6)),
+                        "diffusion_steps":  int(diffusion_cfg["num_steps"]),
+                        "beta_start":       float(diffusion_cfg.get("beta_start", 1e-4)),
+                        "beta_end":         float(diffusion_cfg.get("beta_end",   2e-2)),
+                        "obs_keys":         list(model_cfg.get("obs_keys", [])),
+                        "obs_mean":         dataset.obs_mean,
+                        "obs_std":          dataset.obs_std,
+                        "action_mean":      dataset.action_mean,
+                        "action_std":       dataset.action_std,
+                        "config":           config,
+                        "epoch":            epoch,
+                        "loss":             epoch_loss,
+                    },
+                    best_path,
+                )
 
         if epoch == 1 or epoch % int(train_cfg["log_freq"]) == 0:
             print(f"Epoch {epoch:4d}/{int(train_cfg['num_epochs'])} | loss={epoch_loss:.6f} | best={best_loss:.6f}")
 
-    final_path = os.path.join(train_cfg["output_dir"], "model_final.pt")
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "obs_dim": dataset.obs_dim,
-            "action_dim": dataset.action_dim,
-            "obs_horizon": int(model_cfg["obs_horizon"]),
-            "action_horizon": int(model_cfg["action_horizon"]),
-            "hidden_dim": int(model_cfg["hidden_dim"]),
-            "time_emb_dim": int(model_cfg.get("time_emb_dim", 128)),
-            "diffusion_steps": int(diffusion_cfg["num_steps"]),
-            "beta_start": float(diffusion_cfg.get("beta_start", 1e-4)),
-            "beta_end": float(diffusion_cfg.get("beta_end", 2e-2)),
-            "obs_keys": list(model_cfg.get("obs_keys", [])),
-            "obs_mean": dataset.obs_mean,
-            "obs_std": dataset.obs_std,
-            "action_mean": dataset.action_mean,
-            "action_std": dataset.action_std,
-            "config": config,
-            "loss": epoch_loss,
-            "n_layers": int(model_cfg.get("n_layers", 6)),
-        },
-        final_path,
-    )
+    # ------------------------------------------------------------------
+    # Final checkpoint (raw model weights, not EMA)
+    # ------------------------------------------------------------------
+    if save_fn is not None:
+        save_fn(final_path, model, dataset, config, int(train_cfg["num_epochs"]), epoch_loss)
+    else:
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+                "obs_dim":          dataset.obs_dim,
+                "action_dim":       dataset.action_dim,
+                "obs_horizon":      int(model_cfg["obs_horizon"]),
+                "action_horizon":   int(model_cfg["action_horizon"]),
+                "hidden_dim":       int(model_cfg["hidden_dim"]),
+                "time_emb_dim":     int(model_cfg.get("time_emb_dim", 128)),
+                "n_layers":         int(model_cfg.get("n_layers", 6)),
+                "diffusion_steps":  int(diffusion_cfg["num_steps"]),
+                "beta_start":       float(diffusion_cfg.get("beta_start", 1e-4)),
+                "beta_end":         float(diffusion_cfg.get("beta_end",   2e-2)),
+                "obs_keys":         list(model_cfg.get("obs_keys", [])),
+                "obs_mean":         dataset.obs_mean,
+                "obs_std":          dataset.obs_std,
+                "action_mean":      dataset.action_mean,
+                "action_std":       dataset.action_std,
+                "config":           config,
+                "loss":             epoch_loss,
+            },
+            final_path,
+        )
 
     save_config(os.path.join(train_cfg["output_dir"], "config.json"), config)
-    print(f"Saved best checkpoint: {best_path}")
+    print(f"Saved best checkpoint:  {best_path}")
     print(f"Saved final checkpoint: {final_path}")
 
 

@@ -1,0 +1,51 @@
+{
+    "algo_name": "diffusion",
+    "task": "lift",
+    "experiment": {
+        "name": "lift_diffusion_policy"
+    },
+    "train": {
+        "data": "/home/axs0940/marl_vla/datasets/lift/ph/low_dim_v141.hdf5",
+        "output_dir": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy_v2",
+        "num_epochs": 4500,
+        "batch_size": 256,
+        "num_workers": 2,
+        "log_freq": 10
+    },
+    "model": {
+        "obs_keys": [
+            "robot0_eef_pos",
+            "robot0_eef_quat",
+            "robot0_gripper_qpos",
+            "object"
+        ],
+        "obs_horizon": 2,
+        "action_horizon": 16,
+        "backbone": "unet",
+        "down_dims": [
+            256,
+            512,
+            1024
+        ],
+        "kernel_size": 5,
+        "n_groups": 8,
+        "time_emb_dim": 256,
+        "hidden_dim": 512,
+        "n_layers": 6,
+        "d_model": 256,
+        "n_heads": 8,
+        "n_enc_layers": 4,
+        "n_dec_layers": 4,
+        "d_ff": 1024,
+        "dropout": 0.1
+    },
+    "diffusion": {
+        "num_steps": 100,
+        "beta_start": 0.0001,
+        "beta_end": 0.02
+    },
+    "optimizer": {
+        "lr": 0.0001,
+        "weight_decay": 1e-05
+    }
+}

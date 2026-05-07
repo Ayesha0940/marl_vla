@@ -1,3 +1,5 @@
+# /home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260418190845/models/model_epoch_600.pth
+
 # #!/usr/bin/env bash
 
 # set -euo pipefail
@@ -60,8 +62,8 @@ cd "${REPO_ROOT}"
 
 PYTHON="${PYTHON:-python}"
 CKPT_DIR="${CKPT_DIR:-/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy}"
-ENV_META_CKPT="${ENV_META_CKPT:-checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth}"
-N_ROLLOUTS="${N_ROLLOUTS:-200}"
+ENV_META_CKPT="${ENV_META_CKPT:-checkpoints/bc_rnn_lift/bc_rnn_lift/20260418190845/models/model_epoch_600.pth}"
+N_ROLLOUTS="${N_ROLLOUTS:-50}"
 HORIZON="${HORIZON:-400}"
 SEED="${SEED:-42}"
 T_START="${T_START:-}"
