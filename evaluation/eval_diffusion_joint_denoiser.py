@@ -239,8 +239,16 @@ def _run_rollout_with_denoiser(
 
     step = 0
     while step < horizon:
-        # Clean obs for diffusion model input
-        obs_vec = _flatten_obs(obs, obs_keys)
+        # Apply state noise before diffusion policy (consistent with baseline and BC-RNN)
+        noisy_obs = dict(obs)
+        if alpha_s > 0.0:
+            for key in obs_keys:
+                if key in noisy_obs:
+                    noisy_obs[key] = (
+                        np.asarray(noisy_obs[key], dtype=np.float32)
+                        + rng.normal(0, alpha_s, size=np.asarray(noisy_obs[key]).shape).astype(np.float32)
+                    )
+        obs_vec = _flatten_obs(noisy_obs, obs_keys)
         history = _prepare_history(obs_vec, obs_horizon, history)
         obs_hist = np.stack(history, axis=0)
 
