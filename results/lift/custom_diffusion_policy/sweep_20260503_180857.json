@@ -1,0 +1,72 @@
+{
+    "results": [
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/best_model.pt",
+            "success_rate": 0.855,
+            "n_success": 171,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_1000.pt",
+            "success_rate": 0.705,
+            "n_success": 141,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_1500.pt",
+            "success_rate": 0.815,
+            "n_success": 163,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_2000.pt",
+            "success_rate": 0.805,
+            "n_success": 161,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_2500.pt",
+            "success_rate": 0.835,
+            "n_success": 167,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_3000.pt",
+            "success_rate": 0.835,
+            "n_success": 167,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_3500.pt",
+            "success_rate": 0.88,
+            "n_success": 176,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_4000.pt",
+            "success_rate": 0.86,
+            "n_success": 172,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_500.pt",
+            "success_rate": 0.76,
+            "n_success": 152,
+            "n_rollouts": 200
+        },
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_final.pt",
+            "success_rate": 0.85,
+            "n_success": 170,
+            "n_rollouts": 200
+        }
+    ],
+    "config": {
+        "checkpoint_dir": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy",
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth",
+        "n_rollouts": 200,
+        "horizon": 400,
+        "seed": 42,
+        "t_start": null
+    }
+}

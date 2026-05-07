@@ -68,8 +68,8 @@ DEFAULT_BC_CKPT = os.path.join(
 DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "results", "lift", "joint_denoiser")
 
 # Noise grid from the spec
-DEFAULT_ALPHA_A = [0.05, 0.1, 0.2]
-DEFAULT_ALPHA_S = [0.01]
+DEFAULT_ALPHA_A = [0.00, 0.05, 0.1, 0.2]
+DEFAULT_ALPHA_S = [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]
 
 
 # ── Environment / policy loading ───────────────────────────────────────────────
@@ -425,7 +425,7 @@ def _eval_grid(
 
     Returns a dict:
         results[(alpha_s, alpha_a)][col_name] = success_rate
-    where col_name is e.g. "A0(t=10)".
+    where col_name is e.g. "BASELINE (no denoiser)" or "A0(t=10)".
     """
     # Load all checkpoints upfront
     models = []
@@ -435,7 +435,7 @@ def _eval_grid(
         anchor_id = str(torch.load(ckpt_path, map_location="cpu", weights_only=False).get("anchor_id", "?"))
         models.append((m, anc, alps, alps_bar, norm, H, Ds, Da, gk, anchor_id))
 
-    col_names = [f"{anchor_id}(t={t})" for (_, _, _, _, _, _, _, _, _, anchor_id) in models
+    col_names = ["BASELINE (no denoiser)"] + [f"{anchor_id}(t={t})" for (_, _, _, _, _, _, _, _, _, anchor_id) in models
                  for t in t_starts]
     results = {}
 
@@ -448,6 +448,25 @@ def _eval_grid(
             key = (f"{alpha_s:.3f}", f"{alpha_a:.3f}")
             results[key] = {}
             print(f"\n[Cell {cell_idx}/{total_cells}] alpha_s={alpha_s:.3f}  alpha_a={alpha_a:.3f}")
+
+            baseline_successes, baseline_rewards = [], []
+            for i in range(n_rollouts):
+                seed = base_seed + int(alpha_s * 1000) + int(alpha_a * 1000) * 1000 + i
+                env.reset()
+                ep_reward, success = _run_rollout_noisy(
+                    policy,
+                    env,
+                    obs_keys,
+                    alpha_s,
+                    alpha_a,
+                    episode_horizon,
+                    seed,
+                )
+                baseline_successes.append(success)
+                baseline_rewards.append(ep_reward)
+            baseline_sr = float(np.mean(baseline_successes))
+            results[key]["BASELINE (no denoiser)"] = baseline_sr
+            print(f"  {'BASELINE (no denoiser)':15s}  success_rate={baseline_sr:.4f}")
 
             for (model, anchor, alphas, alphas_bar, norm,
                  horizon_H, state_dim, action_dim, gripper_k, anchor_id) in models:
