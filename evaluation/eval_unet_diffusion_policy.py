@@ -36,10 +36,10 @@ Auto-detects prediction_type from checkpoint.
 
 
 
-# Import x0 sampler from v3 training script (or inline it here)
+# Import x0 sampler from the training script that defines the x0 sampler.
 try:
     sys.path.insert(0, os.path.join(PROJECT_ROOT, "training", "lift"))
-    from train_diffusion_lift_v2 import sample_action_sequence_x0
+    from train_unet_diffusion_lift import sample_action_sequence_x0
 except ImportError:
     sample_action_sequence_x0 = None
 
@@ -128,7 +128,7 @@ def _run_rollout(
             if sample_action_sequence_x0 is None:
                 raise RuntimeError(
                     "sample_action_sequence_x0 not available. "
-                    "Make sure train_diffusion_lift_v2.py is on the path."
+                    "Make sure training/lift/train_unet_diffusion_lift.py is on the path."
                 )
             action_chunk = sample_action_sequence_x0(
                 model=model,
