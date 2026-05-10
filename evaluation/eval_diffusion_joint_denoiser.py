@@ -41,6 +41,12 @@ for path in (PROJECT_ROOT, EVAL_DIR):
 from common.mujoco import configure_mujoco_env
 from diffusion.lift_policy import DEFAULT_OBS_KEYS, load_lift_checkpoint, sample_action_sequence
 
+try:
+    sys.path.insert(0, os.path.join(PROJECT_ROOT, "training", "lift"))
+    from train_unet_diffusion_lift import sample_action_sequence_x0
+except ImportError:
+    sample_action_sequence_x0 = None
+
 DEFAULT_ENV_CKPT = os.path.join(
     PROJECT_ROOT,
     "checkpoints",
@@ -51,7 +57,7 @@ DEFAULT_ENV_CKPT = os.path.join(
     "model_epoch_600.pth",
 )
 
-DEFAULT_ALPHA_S = [0.0, 0.01, 0.02, 0.05]
+DEFAULT_ALPHA_S = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05]
 DEFAULT_ALPHA_A = [0.0, 0.05, 0.1, 0.2]
 
 
@@ -201,10 +207,11 @@ def _run_rollout_with_denoiser(
     joint_obs_keys: Optional[list] = None,
     alpha_s: float = 0.0,
     alpha_a: float = 0.0,
+    prediction_type: str = "epsilon",
 ) -> bool:
     """
     Run rollout with diffusion policy + joint denoiser.
-    
+
     Workflow:
     1. Get action from diffusion policy
     2. Add action noise
@@ -227,10 +234,12 @@ def _run_rollout_with_denoiser(
     diffusion_steps = int(diffusion_checkpoint["diffusion_steps"])
 
     obs = env.reset()
-    history = None
     rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+    obs_vec = _flatten_obs(obs, obs_keys)
+    history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
 
     # Joint denoiser state/action history buffers
     state_buf = deque(maxlen=joint_horizon)
@@ -239,21 +248,24 @@ def _run_rollout_with_denoiser(
 
     step = 0
     while step < horizon:
-        # Apply state noise before diffusion policy (consistent with baseline and BC-RNN)
-        noisy_obs = dict(obs)
+        # Apply state noise before diffusion policy (clean obs kept for env stepping)
         if alpha_s > 0.0:
+            noisy_obs = dict(obs)
             for key in obs_keys:
                 if key in noisy_obs:
                     noisy_obs[key] = (
                         np.asarray(noisy_obs[key], dtype=np.float32)
                         + rng.normal(0, alpha_s, size=np.asarray(noisy_obs[key]).shape).astype(np.float32)
                     )
-        obs_vec = _flatten_obs(noisy_obs, obs_keys)
-        history = _prepare_history(obs_vec, obs_horizon, history)
+            obs_vec = _flatten_obs(noisy_obs, obs_keys)
+        else:
+            noisy_obs = obs
+            obs_vec = _flatten_obs(obs, obs_keys)
+        history.append(obs_vec.copy())
         obs_hist = np.stack(history, axis=0)
 
         # Get action from diffusion policy
-        action_chunk = sample_action_sequence(
+        _sampler_kwargs = dict(
             model=diffusion_model,
             obs_history=obs_hist,
             obs_mean=obs_mean,
@@ -266,6 +278,12 @@ def _run_rollout_with_denoiser(
             t_start=t_start_diffusion,
             device=device,
         )
+        if prediction_type == "x0":
+            if sample_action_sequence_x0 is None:
+                raise RuntimeError("sample_action_sequence_x0 not available; check training/lift/train_unet_diffusion_lift.py")
+            action_chunk = sample_action_sequence_x0(**_sampler_kwargs)
+        else:
+            action_chunk = sample_action_sequence(**_sampler_kwargs)
 
         for action in action_chunk[:action_horizon]:
             if step >= horizon:
@@ -277,17 +295,17 @@ def _run_rollout_with_denoiser(
             action = np.clip(action, -1.0, 1.0)
 
             # Corrupt observation for joint denoiser input
-            noisy_obs = dict(obs)
+            noisy_obs_j = dict(obs)
             if alpha_s > 0.0:
                 for key in obs_keys:
-                    if key in noisy_obs:
-                        noisy_obs[key] = (
-                            np.asarray(noisy_obs[key], dtype=np.float32)
-                            + rng.normal(0, alpha_s, size=np.asarray(noisy_obs[key]).shape).astype(np.float32)
+                    if key in noisy_obs_j:
+                        noisy_obs_j[key] = (
+                            np.asarray(noisy_obs_j[key], dtype=np.float32)
+                            + rng.normal(0, alpha_s, size=np.asarray(noisy_obs_j[key]).shape).astype(np.float32)
                         )
 
             # Build joint denoiser input using the joint denoiser's own obs_keys ordering
-            state_vec = _flatten_obs(noisy_obs, state_obs_keys)
+            state_vec = _flatten_obs(noisy_obs_j, state_obs_keys)
             state_buf.append(state_vec)
             action_buf.append(action)
             gripper_hist_buf.append(float(action[6]))  # gripper command at index 6 for Lift
@@ -346,6 +364,9 @@ def _run_rollout_with_denoiser(
 
             obs, _, done, _ = env.step(clean_a_np)
             step += 1
+            # Update rolling history after every step
+            obs_vec = _flatten_obs(obs, obs_keys)
+            history.append(obs_vec.copy())
             if env.is_success()["task"]:
                 return True
             if done:
@@ -365,6 +386,7 @@ def _run_rollout_baseline(
     t_start_diffusion: Optional[int],
     alpha_s: float = 0.0,
     alpha_a: float = 0.0,
+    prediction_type: str = "epsilon",
 ) -> bool:
     """Run baseline: diffusion policy only (no joint denoiser)."""
     import torch
@@ -380,28 +402,31 @@ def _run_rollout_baseline(
     diffusion_steps = int(diffusion_checkpoint["diffusion_steps"])
 
     obs = env.reset()
-    history = None
     rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    obs_vec = _flatten_obs(obs, obs_keys)
+    history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
+
     step = 0
     while step < horizon:
-        # Corrupt observation
+        # Build noisy obs for the policy query (keep clean obs for env stepping)
         if alpha_s > 0.0:
-            obs = dict(obs)
+            noisy_obs = dict(obs)
             for key in obs_keys:
-                if key in obs:
-                    obs[key] = (
-                        np.asarray(obs[key], dtype=np.float32)
-                        + rng.normal(0, alpha_s, size=np.asarray(obs[key]).shape).astype(np.float32)
+                if key in noisy_obs:
+                    noisy_obs[key] = (
+                        np.asarray(noisy_obs[key], dtype=np.float32)
+                        + rng.normal(0, alpha_s, size=np.asarray(noisy_obs[key]).shape).astype(np.float32)
                     )
-
-        obs_vec = _flatten_obs(obs, obs_keys)
-        history = _prepare_history(obs_vec, obs_horizon, history)
+            obs_vec = _flatten_obs(noisy_obs, obs_keys)
+        else:
+            obs_vec = _flatten_obs(obs, obs_keys)
+        history.append(obs_vec.copy())
         obs_hist = np.stack(history, axis=0)
 
-        action_chunk = sample_action_sequence(
+        _sampler_kwargs = dict(
             model=diffusion_model,
             obs_history=obs_hist,
             obs_mean=obs_mean,
@@ -414,6 +439,12 @@ def _run_rollout_baseline(
             t_start=t_start_diffusion,
             device=device,
         )
+        if prediction_type == "x0":
+            if sample_action_sequence_x0 is None:
+                raise RuntimeError("sample_action_sequence_x0 not available; check training/lift/train_unet_diffusion_lift.py")
+            action_chunk = sample_action_sequence_x0(**_sampler_kwargs)
+        else:
+            action_chunk = sample_action_sequence(**_sampler_kwargs)
 
         for action in action_chunk[:action_horizon]:
             if step >= horizon:
@@ -425,6 +456,9 @@ def _run_rollout_baseline(
 
             obs, _, done, _ = env.step(np.clip(action, -1.0, 1.0))
             step += 1
+            # Update rolling history after every step
+            obs_vec = _flatten_obs(obs, obs_keys)
+            history.append(obs_vec.copy())
             if env.is_success()["task"]:
                 return True
             if done:
@@ -445,6 +479,7 @@ def _eval_condition(
     t_start_diffusion: Optional[int],
     alpha_s: float,
     alpha_a: float,
+    prediction_type: str = "epsilon",
     joint_model=None,
     joint_anchor=None,
     joint_alphas=None,
@@ -471,6 +506,7 @@ def _eval_condition(
                 t_start_diffusion,
                 alpha_s=alpha_s,
                 alpha_a=alpha_a,
+                prediction_type=prediction_type,
             )
         else:
             # With joint denoiser
@@ -494,6 +530,7 @@ def _eval_condition(
                 joint_obs_keys=joint_obs_keys,
                 alpha_s=alpha_s,
                 alpha_a=alpha_a,
+                prediction_type=prediction_type,
             )
         successes.append(success)
 
@@ -548,7 +585,7 @@ def parse_args():
         default=DEFAULT_ALPHA_A,
         help="Action noise levels",
     )
-    parser.add_argument("--n_rollouts", type=int, default=50, help="Rollouts per condition")
+    parser.add_argument("--n_rollouts", type=int, default=25, help="Rollouts per condition")
     parser.add_argument("--horizon", type=int, default=400, help="Episode horizon")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--t_start", type=int, default=None, help="Diffusion t_start parameter")
@@ -602,9 +639,21 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")
     print("Loading diffusion policy...")
-    diffusion_model, diffusion_checkpoint_dict, diffusion_alphas, diffusion_alphas_bar = load_lift_checkpoint(
-        diffusion_checkpoint, device
-    )
+    _peek = torch.load(diffusion_checkpoint, map_location="cpu", weights_only=False)
+    if _peek.get("backbone") == "unet":
+        from diffusion.lift_policy_unet import load_unet_checkpoint
+        diffusion_model, diffusion_checkpoint_dict, diffusion_alphas, diffusion_alphas_bar = load_unet_checkpoint(
+            diffusion_checkpoint, device
+        )
+        print("  -> UNet backbone detected")
+    else:
+        diffusion_model, diffusion_checkpoint_dict, diffusion_alphas, diffusion_alphas_bar = load_lift_checkpoint(
+            diffusion_checkpoint, device
+        )
+        print("  -> MLP backbone detected")
+
+    prediction_type = diffusion_checkpoint_dict.get("prediction_type", "epsilon")
+    print(f"  -> prediction_type: {prediction_type}")
 
     # Load environment
     print("Loading environment...")
@@ -663,6 +712,7 @@ def main():
                 args.t_start,
                 alpha_s,
                 alpha_a,
+                prediction_type=prediction_type,
             )
             results[key]["BASELINE (diffusion only)"] = sr_baseline
             print(f"success_rate={sr_baseline:.4f}")
@@ -685,6 +735,7 @@ def main():
                         args.t_start,
                         alpha_s,
                         alpha_a,
+                        prediction_type=prediction_type,
                         joint_model=jm,
                         joint_anchor=ja,
                         joint_alphas=ja_alphas,

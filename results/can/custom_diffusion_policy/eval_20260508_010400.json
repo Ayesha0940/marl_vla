@@ -1,0 +1,20 @@
+{
+    "results": [
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/can_diffusion_policy/best_model.pt",
+            "success_rate": 0.2,
+            "n_success": 1,
+            "n_rollouts": 5
+        }
+    ],
+    "config": {
+        "checkpoint": "/home/axs0940/marl_vla/checkpoints/can_diffusion_policy/best_model.pt",
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_can/bc_rnn_can/20260405211805/models/model_epoch_600.pth",
+        "n_rollouts": 5,
+        "horizon": 400,
+        "seed": 0,
+        "t_start": null,
+        "noise_std": 0.0,
+        "method": "none"
+    }
+}

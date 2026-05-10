@@ -1,0 +1,37 @@
+{
+    "algo_name": "diffusion",
+    "task": "can",
+    "experiment": {
+        "name": "can_diffusion_policy"
+    },
+    "train": {
+        "data": "/home/axs0940/marl_vla/datasets/can/ph/low_dim_v141.hdf5",
+        "output_dir": "/home/axs0940/marl_vla/checkpoints/can_diffusion_policy",
+        "num_epochs": 2000,
+        "batch_size": 256,
+        "num_workers": 2,
+        "log_freq": 10
+    },
+    "model": {
+        "obs_keys": [
+            "robot0_eef_pos",
+            "robot0_eef_quat",
+            "robot0_gripper_qpos",
+            "object"
+        ],
+        "obs_horizon": 2,
+        "action_horizon": 8,
+        "hidden_dim": 512,
+        "time_emb_dim": 128,
+        "n_layers": 6
+    },
+    "diffusion": {
+        "num_steps": 100,
+        "beta_start": 0.0001,
+        "beta_end": 0.02
+    },
+    "optimizer": {
+        "lr": 1e-05,
+        "weight_decay": 1e-05
+    }
+}

@@ -1,0 +1,42 @@
+{
+    "results": [
+        {
+            "exec_horizon": 1,
+            "success_rate": 0.94,
+            "n_success": 47,
+            "n_rollouts": 50
+        },
+        {
+            "exec_horizon": 2,
+            "success_rate": 1.0,
+            "n_success": 50,
+            "n_rollouts": 50
+        },
+        {
+            "exec_horizon": 4,
+            "success_rate": 0.96,
+            "n_success": 48,
+            "n_rollouts": 50
+        },
+        {
+            "exec_horizon": 8,
+            "success_rate": 0.92,
+            "n_success": 46,
+            "n_rollouts": 50
+        }
+    ],
+    "config": {
+        "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy/model_epoch_4000.pt",
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth",
+        "exec_horizons": [
+            1,
+            2,
+            4,
+            8
+        ],
+        "n_rollouts": 50,
+        "horizon": 400,
+        "seed": 0,
+        "t_start": null
+    }
+}
