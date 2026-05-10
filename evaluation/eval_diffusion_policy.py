@@ -107,6 +107,23 @@ def _load_env(env_ckpt: str):
     return env
 
 
+def _load_checkpoint(checkpoint_path: str, device):
+    import torch
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    backbone = checkpoint.get("backbone", "mlp")
+
+    if backbone == "unet":
+        from diffusion.lift_policy_unet import load_unet_checkpoint
+
+        return load_unet_checkpoint(checkpoint_path, device)
+    if backbone == "transformer":
+        from diffusion.lift_policy_transformer import load_transformer_checkpoint
+
+        return load_transformer_checkpoint(checkpoint_path, device)
+    return load_lift_checkpoint(checkpoint_path, device)
+
+
 def _flatten_obs(obs: dict, obs_keys: Iterable[str]) -> np.ndarray:
     return np.concatenate([np.asarray(obs[key]).reshape(-1) for key in obs_keys]).astype(np.float32)
 
@@ -192,7 +209,7 @@ def _eval_checkpoint(checkpoint_path: str, env_ckpt: str, n_rollouts: int, horiz
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, checkpoint, alphas, alphas_bar = load_lift_checkpoint(checkpoint_path, device)
+    model, checkpoint, alphas, alphas_bar = _load_checkpoint(checkpoint_path, device)
     env = _load_env(env_ckpt)
     
     # Get action dimension from checkpoint

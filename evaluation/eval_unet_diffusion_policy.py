@@ -36,12 +36,18 @@ Auto-detects prediction_type from checkpoint.
 
 
 
-# Import x0 sampler from v3 training script (or inline it here)
-try:
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "training", "lift"))
-    from train_diffusion_lift_v2 import sample_action_sequence_x0
-except ImportError:
-    sample_action_sequence_x0 = None
+# Import x0 sampler from the lifted training scripts.
+# The sampler lives in train_unet_diffusion_lift.py for the v5 x0 checkpoints,
+# but we keep a fallback import for older script names.
+sample_action_sequence_x0 = None
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "training", "lift"))
+for module_name in ("train_unet_diffusion_lift", "train_diffusion_lift_v2"):
+    try:
+        module = __import__(module_name, fromlist=["sample_action_sequence_x0"])
+        sample_action_sequence_x0 = module.sample_action_sequence_x0
+        break
+    except (ImportError, AttributeError):
+        continue
 
 
 def find_default_env_ckpt():
