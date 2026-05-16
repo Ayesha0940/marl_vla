@@ -30,7 +30,7 @@ DEFAULT_BC_CKPT = os.path.join(
     "20260405174006", "models", "model_epoch_600.pth",
 )
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "results", "lift", "joint_denoiser", "baselines.csv")
-DEFAULT_ALPHA_S = [0.01, 0.02, 0.03, 0.04, 0.05]
+DEFAULT_ALPHA_S = [0.005, 0.01, 0.015, 0.02]
 DEFAULT_ALPHA_A = [0.05, 0.1, 0.2]
 
 

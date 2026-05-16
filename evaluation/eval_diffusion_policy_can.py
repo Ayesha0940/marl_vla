@@ -24,6 +24,18 @@ for path in (PROJECT_ROOT, EVAL_DIR):
 from common.mujoco import configure_mujoco_env
 from common.results import save_results_json, print_robustness_summary
 from diffusion.can_policy import DEFAULT_OBS_KEYS, load_can_checkpoint, sample_action_sequence
+from diffusion.can_policy_unet import load_unet_checkpoint, sample_action_sequence_x0
+
+
+def _load_checkpoint(checkpoint_path: str, device):
+    """Load MLP or UNet checkpoint; return (model, ckpt_dict, alphas, alphas_bar, sample_fn)."""
+    import torch
+    probe = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if probe.get("backbone") == "unet":
+        model, ckpt, alphas, alphas_bar = load_unet_checkpoint(checkpoint_path, device)
+        return model, ckpt, alphas, alphas_bar, sample_action_sequence_x0
+    model, ckpt, alphas, alphas_bar = load_can_checkpoint(checkpoint_path, device)
+    return model, ckpt, alphas, alphas_bar, sample_action_sequence
 
 
 DEFAULT_ENV_CKPT = os.path.join(
@@ -128,8 +140,11 @@ def _find_checkpoints(path: str) -> List[str]:
     return [path]
 
 
-def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed: int, t_start: Optional[int], noise_std: float = 0.0, method: str = "none", filt=None, exec_horizon: Optional[int] = None) -> bool:
+def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed: int, t_start: Optional[int], noise_std: float = 0.0, method: str = "none", filt=None, exec_horizon: Optional[int] = None, sample_fn=None) -> bool:
     import torch
+
+    if sample_fn is None:
+        sample_fn = sample_action_sequence
 
     device = next(model.parameters()).device
     obs_keys = list(checkpoint.get("obs_keys") or DEFAULT_OBS_KEYS)
@@ -153,7 +168,7 @@ def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed:
         history = _prepare_history(obs_vec, obs_horizon, history)
         obs_hist = np.stack(history, axis=0)
 
-        action_chunk = sample_action_sequence(
+        action_chunk = sample_fn(
             model=model,
             obs_history=obs_hist,
             obs_mean=obs_mean,
@@ -190,15 +205,18 @@ def _eval_checkpoint(checkpoint_path: str, env_ckpt: str, n_rollouts: int, horiz
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, checkpoint, alphas, alphas_bar = load_can_checkpoint(checkpoint_path, device)
+    model, checkpoint, alphas, alphas_bar, sample_fn = _load_checkpoint(checkpoint_path, device)
     env = _load_env(env_ckpt)
+
+    backbone = checkpoint.get("backbone", "mlp")
+    print(f"Backbone: {backbone}  |  prediction: {checkpoint.get('prediction_type', 'epsilon')}")
 
     action_dim = checkpoint.get("action_dim", 7)
 
     successes = []
     for index in range(n_rollouts):
         rollout_filt = _create_filter(method, action_dim) if method != "none" else None
-        success = _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon, seed + index, t_start, noise_std, method, rollout_filt, exec_horizon)
+        success = _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon, seed + index, t_start, noise_std, method, rollout_filt, exec_horizon, sample_fn=sample_fn)
         successes.append(success)
         print(f"  Rollout {index + 1:3d}/{n_rollouts}: {'SUCCESS' if success else 'FAILURE'}")
 
