@@ -8,16 +8,17 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Set repository root (two levels up from training/can -> repo root)
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-BC_RNN_CKPT="checkpoints/bc_rnn_can/bc_rnn_can/20260405211805/models/model_epoch_600.pth"
+BC_RNN_CKPT="checkpoints/bc_rnn_can/bc_rnn_can/20260420182529/models/model_epoch_600.pth"
 HDF5_PATH="datasets/can/ph/low_dim_v141.hdf5"
 
 ANCHORS=(A0 A2 A3 A7)
 HORIZON=16
 DIFFUSION_STEPS=100
-EPOCHS=200
+EPOCHS=400
 BATCH_SIZE=256
 LR=1e-4
 N_ROLLOUTS=25
@@ -29,13 +30,13 @@ mkdir -p "${RESULTS_DIR}" "${CKPT_DIR}"
 export MUJOCO_GL=egl
 PYTHON="python -u"
 
-echo "============================================================"
-echo "[BASELINES]"
-echo "============================================================"
-$PYTHON evaluation/eval_baselines.py \
-    --bc_rnn_ckpt "${BC_RNN_CKPT}" \
-    --n_rollouts  "${N_ROLLOUTS}" \
-    --output_csv  "${RESULTS_DIR}/baselines.csv"
+# echo "============================================================"
+# echo "[BASELINES]"
+# echo "============================================================"
+# $PYTHON evaluation/eval_baselines.py \
+#     --bc_rnn_ckpt "${BC_RNN_CKPT}" \
+#     --n_rollouts  "${N_ROLLOUTS}" \
+#     --output_csv  "${RESULTS_DIR}/baselines.csv"
 
 run_variant() {
     local name="$1"; shift

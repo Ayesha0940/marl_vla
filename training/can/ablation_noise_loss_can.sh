@@ -14,14 +14,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-BC_RNN_CKPT="checkpoints/bc_rnn_can/bc_rnn_can/20260405211805/models/model_epoch_600.pth"
+BC_RNN_CKPT="checkpoints/bc_rnn_can/bc_rnn_can/20260420182529/models/model_epoch_600.pth"
 
-ANCHORS=(A0 A2 A3 A7)
+ANCHORS=(A0 A7)
 N_ROLLOUTS=25
-T_STARTS=(10)
+T_STARTS=(5 10 20)
 
 RESULTS_DIR="results/can/joint_denoiser"
 CKPT_DIR="diffusion_models/ablation_can"

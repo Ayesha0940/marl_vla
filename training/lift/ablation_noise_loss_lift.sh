@@ -27,7 +27,7 @@ EPOCHS=200
 BATCH_SIZE=256
 LR=1e-4
 N_ROLLOUTS=50
-T_STARTS=(10)
+T_STARTS=(5 10 20)
 
 RESULTS_DIR="results/lift/joint_denoiser"
 CKPT_DIR="diffusion_models/ablation"
