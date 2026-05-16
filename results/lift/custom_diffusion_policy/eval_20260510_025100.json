@@ -1,0 +1,20 @@
+{
+    "results": [
+        {
+            "checkpoint": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy_v5/best_model.pt",
+            "success_rate": 0.0,
+            "n_success": 0,
+            "n_rollouts": 1
+        }
+    ],
+    "config": {
+        "agent": "/home/axs0940/marl_vla/checkpoints/lift_diffusion_policy_v5/best_model.pt",
+        "sweep": null,
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth",
+        "n_rollouts": 1,
+        "horizon": 1,
+        "seed": 0,
+        "t_start": null,
+        "exec_horizon": 1
+    }
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate the custom Lift diffusion policy."""
+"""Evaluate the custom Can diffusion policy."""
 
 from __future__ import annotations
 
@@ -23,20 +23,32 @@ for path in (PROJECT_ROOT, EVAL_DIR):
 
 from common.mujoco import configure_mujoco_env
 from common.results import save_results_json, print_robustness_summary
-from diffusion.lift_policy import DEFAULT_OBS_KEYS, load_lift_checkpoint, sample_action_sequence
+from diffusion.can_policy import DEFAULT_OBS_KEYS, load_can_checkpoint, sample_action_sequence
+from diffusion.can_policy_unet import load_unet_checkpoint, sample_action_sequence_x0
+
+
+def _load_checkpoint(checkpoint_path: str, device):
+    """Load MLP or UNet checkpoint; return (model, ckpt_dict, alphas, alphas_bar, sample_fn)."""
+    import torch
+    probe = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if probe.get("backbone") == "unet":
+        model, ckpt, alphas, alphas_bar = load_unet_checkpoint(checkpoint_path, device)
+        return model, ckpt, alphas, alphas_bar, sample_action_sequence_x0
+    model, ckpt, alphas, alphas_bar = load_can_checkpoint(checkpoint_path, device)
+    return model, ckpt, alphas, alphas_bar, sample_action_sequence
 
 
 DEFAULT_ENV_CKPT = os.path.join(
     PROJECT_ROOT,
     "checkpoints",
-    "bc_rnn_lift",
-    "bc_rnn_lift",
-    "20260405174006",
+    "bc_rnn_can",
+    "bc_rnn_can",
+    "20260405211805",
     "models",
     "model_epoch_600.pth",
 )
 
-# Default noise levels for lift task
+# Default noise levels for can task
 DEFAULT_NOISE_LEVELS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
 
@@ -80,7 +92,6 @@ class KalmanFilter:
 
 
 def _create_filter(method: str, action_dim: int):
-    """Create a filter for the given method."""
     if method == "kalman":
         return KalmanFilter(dim=action_dim)
     if method == "ema":
@@ -107,23 +118,6 @@ def _load_env(env_ckpt: str):
     return env
 
 
-def _load_checkpoint(checkpoint_path: str, device):
-    import torch
-
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    backbone = checkpoint.get("backbone", "mlp")
-
-    if backbone == "unet":
-        from diffusion.lift_policy_unet import load_unet_checkpoint
-
-        return load_unet_checkpoint(checkpoint_path, device)
-    if backbone == "transformer":
-        from diffusion.lift_policy_transformer import load_transformer_checkpoint
-
-        return load_transformer_checkpoint(checkpoint_path, device)
-    return load_lift_checkpoint(checkpoint_path, device)
-
-
 def _flatten_obs(obs: dict, obs_keys: Iterable[str]) -> np.ndarray:
     return np.concatenate([np.asarray(obs[key]).reshape(-1) for key in obs_keys]).astype(np.float32)
 
@@ -146,8 +140,11 @@ def _find_checkpoints(path: str) -> List[str]:
     return [path]
 
 
-def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed: int, t_start: Optional[int], noise_std: float = 0.0, method: str = "none", filt=None) -> bool:
+def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed: int, t_start: Optional[int], noise_std: float = 0.0, method: str = "none", filt=None, exec_horizon: Optional[int] = None, sample_fn=None) -> bool:
     import torch
+
+    if sample_fn is None:
+        sample_fn = sample_action_sequence
 
     device = next(model.parameters()).device
     obs_keys = list(checkpoint.get("obs_keys") or DEFAULT_OBS_KEYS)
@@ -158,6 +155,7 @@ def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed:
     obs_horizon = int(checkpoint["obs_horizon"])
     action_horizon = int(checkpoint["action_horizon"])
     diffusion_steps = int(checkpoint["diffusion_steps"])
+    exec_steps = exec_horizon if exec_horizon is not None else action_horizon
 
     obs = env.reset()
     history = None
@@ -170,7 +168,7 @@ def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed:
         history = _prepare_history(obs_vec, obs_horizon, history)
         obs_hist = np.stack(history, axis=0)
 
-        action_chunk = sample_action_sequence(
+        action_chunk = sample_fn(
             model=model,
             obs_history=obs_hist,
             obs_mean=obs_mean,
@@ -184,17 +182,15 @@ def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed:
             device=device,
         )
 
-        for action in action_chunk[:action_horizon]:
+        for action in action_chunk[:exec_steps]:
             if step >= horizon:
                 break
-            
-            # Add noise to action
+
             noisy_action = action + np.random.normal(0, noise_std, size=action.shape) if noise_std > 0 else action
-            
-            # Apply filter if specified
+
             if filt is not None:
                 noisy_action = filt.update(noisy_action)
-            
+
             obs, _, done, _ = env.step(np.clip(noisy_action, -1.0, 1.0))
             step += 1
             if env.is_success()["task"]:
@@ -205,21 +201,22 @@ def _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon: int, seed:
     return False
 
 
-def _eval_checkpoint(checkpoint_path: str, env_ckpt: str, n_rollouts: int, horizon: int, seed: int, t_start: Optional[int], noise_std: float = 0.0, method: str = "none", filt=None) -> dict:
+def _eval_checkpoint(checkpoint_path: str, env_ckpt: str, n_rollouts: int, horizon: int, seed: int, t_start: Optional[int], noise_std: float = 0.0, method: str = "none", exec_horizon: Optional[int] = None) -> dict:
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, checkpoint, alphas, alphas_bar = _load_checkpoint(checkpoint_path, device)
+    model, checkpoint, alphas, alphas_bar, sample_fn = _load_checkpoint(checkpoint_path, device)
     env = _load_env(env_ckpt)
-    
-    # Get action dimension from checkpoint
-    action_dim = checkpoint.get("action_dim", int(checkpoint.get("action_horizon", 16)) * 2)
+
+    backbone = checkpoint.get("backbone", "mlp")
+    print(f"Backbone: {backbone}  |  prediction: {checkpoint.get('prediction_type', 'epsilon')}")
+
+    action_dim = checkpoint.get("action_dim", 7)
 
     successes = []
     for index in range(n_rollouts):
-        # Create filter for each rollout if needed
         rollout_filt = _create_filter(method, action_dim) if method != "none" else None
-        success = _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon, seed + index, t_start, noise_std, method, rollout_filt)
+        success = _run_rollout(model, checkpoint, alphas, alphas_bar, env, horizon, seed + index, t_start, noise_std, method, rollout_filt, exec_horizon, sample_fn=sample_fn)
         successes.append(success)
         print(f"  Rollout {index + 1:3d}/{n_rollouts}: {'SUCCESS' if success else 'FAILURE'}")
 
@@ -242,17 +239,18 @@ def _run_single(args: argparse.Namespace) -> int:
     print(f"Evaluating: {checkpoint_path}")
     print(f"Env checkpoint: {env_ckpt}")
     stats = _eval_checkpoint(
-        checkpoint_path, 
-        env_ckpt, 
-        args.n_rollouts, 
-        args.horizon, 
-        args.seed, 
+        checkpoint_path,
+        env_ckpt,
+        args.n_rollouts,
+        args.horizon,
+        args.seed,
         args.t_start,
         noise_std=getattr(args, 'noise_std', 0.0),
         method=getattr(args, 'method', 'none'),
+        exec_horizon=args.exec_horizon,
     )
 
-    results_dir = os.path.join(PROJECT_ROOT, "results", "lift", "custom_diffusion_policy")
+    results_dir = os.path.join(PROJECT_ROOT, "results", "can", "custom_diffusion_policy")
     os.makedirs(results_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(results_dir, f"eval_{timestamp}.json")
@@ -274,7 +272,6 @@ def _run_single(args: argparse.Namespace) -> int:
 
 
 def _run_noise_sweep(args: argparse.Namespace) -> int:
-    """Run noise sweep evaluation on a single checkpoint."""
     checkpoint_path = args.agent if os.path.isabs(args.agent) else os.path.join(PROJECT_ROOT, args.agent)
     if not os.path.isfile(checkpoint_path):
         print(f"Checkpoint not found: {checkpoint_path}")
@@ -287,26 +284,27 @@ def _run_noise_sweep(args: argparse.Namespace) -> int:
 
     print(f"Evaluating: {checkpoint_path}")
     print(f"Env checkpoint: {env_ckpt}")
-    
+
     noise_levels = args.noise_levels if args.noise_levels else DEFAULT_NOISE_LEVELS
     methods = args.methods if args.methods else ["none"]
-    
+
     print(f"Noise levels: {noise_levels}")
     print(f"Methods: {methods}")
-    
+
     all_results = []
     for noise_std in noise_levels:
         for method in methods:
             print(f"\n--- Noise: {noise_std:.2f}, Method: {method} ---")
             stats = _eval_checkpoint(
-                checkpoint_path, 
-                env_ckpt, 
-                args.n_rollouts, 
-                args.horizon, 
-                args.seed, 
+                checkpoint_path,
+                env_ckpt,
+                args.n_rollouts,
+                args.horizon,
+                args.seed,
                 args.t_start,
                 noise_std=noise_std,
                 method=method,
+                exec_horizon=args.exec_horizon,
             )
             all_results.append({
                 "noise_std": noise_std,
@@ -316,11 +314,10 @@ def _run_noise_sweep(args: argparse.Namespace) -> int:
                 "n_rollouts": stats["n_rollouts"],
                 "mean_reward": None,
             })
-    
-    # Print summary
+
     print_robustness_summary(all_results)
-    
-    results_dir = os.path.join(PROJECT_ROOT, "results", "lift", "custom_diffusion_policy")
+
+    results_dir = os.path.join(PROJECT_ROOT, "results", "can", "custom_diffusion_policy")
     os.makedirs(results_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(results_dir, f"noise_sweep_{timestamp}.json")
@@ -363,7 +360,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         stats = _eval_checkpoint(checkpoint_path, env_ckpt, args.n_rollouts, args.horizon, args.seed, args.t_start)
         rows.append({"checkpoint": checkpoint_path, **stats})
 
-    results_dir = os.path.join(PROJECT_ROOT, "results", "lift", "custom_diffusion_policy")
+    results_dir = os.path.join(PROJECT_ROOT, "results", "can", "custom_diffusion_policy")
     os.makedirs(results_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(results_dir, f"sweep_{timestamp}.json")
@@ -383,22 +380,22 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate the custom Lift diffusion policy")
+    parser = argparse.ArgumentParser(description="Evaluate the custom Can diffusion policy")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--agent", type=str, help="Path to a checkpoint .pt file")
     group.add_argument("--sweep", type=str, help="Path to a directory of checkpoints")
-    
-    parser.add_argument("--env_ckpt", type=str, default=DEFAULT_ENV_CKPT, help="Robomimic Lift checkpoint used to build the env")
+
+    parser.add_argument("--env_ckpt", type=str, default=DEFAULT_ENV_CKPT, help="Robomimic Can checkpoint used to build the env")
     parser.add_argument("--n_rollouts", type=int, default=50)
     parser.add_argument("--horizon", type=int, default=400)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--t_start", type=int, default=None, help="Reverse diffusion start step; defaults to the full schedule")
-    
-    # Noise sweep parameters
+    parser.add_argument("--exec_horizon", type=int, default=None, help="Actions to execute per chunk before replanning (default: full action_horizon)")
+
     parser.add_argument("--noise", action="store_true", help="Run noise sweep evaluation")
     parser.add_argument("--noise_levels", type=float, nargs="+", default=None, help="Noise levels for sweep (default: {})".format(DEFAULT_NOISE_LEVELS))
     parser.add_argument("--methods", type=str, nargs="+", default=None, choices=["none", "kalman", "ema", "median"], help="Filtering methods to use")
-    
+
     return parser.parse_args()
 
 
