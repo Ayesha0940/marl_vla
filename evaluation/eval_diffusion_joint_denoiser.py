@@ -57,8 +57,8 @@ DEFAULT_ENV_CKPT = os.path.join(
     "model_epoch_600.pth",
 )
 
-DEFAULT_ALPHA_S = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05]
-DEFAULT_ALPHA_A = [0.0, 0.05, 0.1, 0.2]
+DEFAULT_ALPHA_S = [0.0]
+DEFAULT_ALPHA_A = [0.0]
 
 
 def _load_env(env_ckpt: str):
@@ -558,6 +558,11 @@ def parse_args():
         help="Explicit joint denoiser checkpoint paths to use instead of ablation discovery",
     )
     parser.add_argument(
+        "--baseline_only",
+        action="store_true",
+        help="Skip denoiser evaluation; run baseline diffusion policy only",
+    )
+    parser.add_argument(
         "--variants",
         type=str,
         nargs="+",
@@ -640,7 +645,26 @@ def main():
     print(f"\nDevice: {device}")
     print("Loading diffusion policy...")
     _peek = torch.load(diffusion_checkpoint, map_location="cpu", weights_only=False)
-    if _peek.get("backbone") == "unet":
+
+    # Robust backbone detection: prefer explicit "backbone" field, otherwise
+    # inspect keys inside the saved state_dict to guess UNet vs MLP.
+    sd_keys = []
+    if isinstance(_peek, dict):
+        if "model_state_dict" in _peek and isinstance(_peek["model_state_dict"], dict):
+            sd_keys = list(_peek["model_state_dict"].keys())
+        else:
+            sd_keys = list(_peek.keys())
+
+    def _looks_like_unet(keys):
+        for k in keys:
+            lk = k.lower()
+            if lk.startswith("down_blocks") or lk.startswith("up_blocks") or lk.startswith("final_conv") or "cond_encoder" in lk:
+                return True
+        return False
+
+    is_unet = (_peek.get("backbone") == "unet") or _looks_like_unet(sd_keys)
+
+    if is_unet:
         from diffusion.lift_policy_unet import load_unet_checkpoint
         diffusion_model, diffusion_checkpoint_dict, diffusion_alphas, diffusion_alphas_bar = load_unet_checkpoint(
             diffusion_checkpoint, device
@@ -660,23 +684,26 @@ def main():
     env = _load_env(env_ckpt)
 
     # Find and load joint denoiser models (or use explicit list if provided)
-    print("Searching for joint denoiser models...")
-    if args.joint_ckpts:
-        joint_models = {}
-        for p in args.joint_ckpts:
-            p_abs = p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)
-            if os.path.isfile(p_abs):
-                key = os.path.splitext(os.path.basename(p_abs))[0]
-                joint_models[key] = p_abs
-                print(f"Using explicit joint ckpt: {key} -> {os.path.basename(p_abs)}")
-            else:
-                print(f"Warning: joint checkpoint not found: {p_abs}")
+    joint_models = {}
+    if args.baseline_only:
+        print("Baseline only mode: skipping denoiser models")
     else:
-        joint_models = _find_ablation_models(args.ablation_dir, args.variants, args.anchors)
+        print("Searching for joint denoiser models...")
+        if args.joint_ckpts:
+            for p in args.joint_ckpts:
+                p_abs = p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)
+                if os.path.isfile(p_abs):
+                    key = os.path.splitext(os.path.basename(p_abs))[0]
+                    joint_models[key] = p_abs
+                    print(f"Using explicit joint ckpt: {key} -> {os.path.basename(p_abs)}")
+                else:
+                    print(f"Warning: joint checkpoint not found: {p_abs}")
+        else:
+            joint_models = _find_ablation_models(args.ablation_dir, args.variants, args.anchors)
 
-    if not joint_models:
-        print(f"Warning: No joint denoiser models found in {args.ablation_dir}")
-        joint_models = {}
+        if not joint_models:
+            print(f"Warning: No joint denoiser models found in {args.ablation_dir}")
+            joint_models = {}
 
     # Prepare results structure
     results = {}

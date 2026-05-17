@@ -22,7 +22,7 @@ import os
 import sys
 from collections import deque
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 
@@ -35,12 +35,35 @@ for path in (PROJECT_ROOT, EVAL_DIR):
 from common.mujoco import configure_mujoco_env
 from diffusion.lift_policy import DEFAULT_OBS_KEYS, load_lift_checkpoint, sample_action_sequence
 
+# x0 sampler — needed for unet/unet_samdp/transformer checkpoints
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "training", "lift"))
+_sample_x0 = None
+for _mod in ("train_unet_diffusion_lift", "train_diffusion_lift_v2"):
+    try:
+        _sample_x0 = __import__(_mod, fromlist=["sample_action_sequence_x0"]).sample_action_sequence_x0
+        break
+    except (ImportError, AttributeError):
+        continue
+
+
+def _load_checkpoint_any(checkpoint_path: str, device):
+    """Backbone-aware checkpoint loader (mlp / unet / unet_samdp / transformer)."""
+    import torch
+    backbone = torch.load(checkpoint_path, map_location="cpu", weights_only=False).get("backbone", "mlp")
+    if backbone in ("unet", "unet_samdp"):
+        from diffusion.lift_policy_unet import load_unet_checkpoint
+        return load_unet_checkpoint(checkpoint_path, device)
+    if backbone == "transformer":
+        from diffusion.lift_policy_transformer import load_transformer_checkpoint
+        return load_transformer_checkpoint(checkpoint_path, device)
+    return load_lift_checkpoint(checkpoint_path, device)
+
 DEFAULT_ENV_CKPT = os.path.join(
     PROJECT_ROOT,
     "checkpoints",
     "bc_rnn_lift",
     "bc_rnn_lift",
-    "20260405174006",
+    "20260418190845",
     "models",
     "model_epoch_600.pth",
 )
@@ -70,14 +93,6 @@ def _flatten_obs(obs: dict, obs_keys) -> np.ndarray:
     return np.concatenate([np.asarray(obs[key]).reshape(-1) for key in obs_keys]).astype(np.float32)
 
 
-def _prepare_history(obs_vec: np.ndarray, obs_horizon: int, history: Optional[deque]) -> deque:
-    if history is None:
-        history = deque([obs_vec.copy() for _ in range(obs_horizon)], maxlen=obs_horizon)
-    else:
-        history.append(obs_vec.copy())
-    return history
-
-
 def _run_rollout(
     model,
     checkpoint,
@@ -90,48 +105,50 @@ def _run_rollout(
     alpha_s: float = 0.0,
     alpha_a: float = 0.0,
 ) -> bool:
-    """
-    Run a single rollout with specified state and action noise levels.
-    
-    Args:
-        alpha_s: Standard deviation of state (observation) noise
-        alpha_a: Standard deviation of action noise
-    """
     import torch
 
     device = next(model.parameters()).device
-    obs_keys = list(checkpoint.get("obs_keys") or DEFAULT_OBS_KEYS)
-    obs_mean = np.asarray(checkpoint["obs_mean"], dtype=np.float32)
-    obs_std = np.asarray(checkpoint["obs_std"], dtype=np.float32)
-    action_mean = np.asarray(checkpoint["action_mean"], dtype=np.float32)
-    action_std = np.asarray(checkpoint["action_std"], dtype=np.float32)
-    obs_horizon = int(checkpoint["obs_horizon"])
+    obs_keys       = list(checkpoint.get("obs_keys") or DEFAULT_OBS_KEYS)
+    obs_mean       = np.asarray(checkpoint["obs_mean"],    dtype=np.float32)
+    obs_std        = np.asarray(checkpoint["obs_std"],     dtype=np.float32)
+    action_mean    = np.asarray(checkpoint["action_mean"], dtype=np.float32)
+    action_std     = np.asarray(checkpoint["action_std"],  dtype=np.float32)
+    obs_horizon    = int(checkpoint["obs_horizon"])
     action_horizon = int(checkpoint["action_horizon"])
     diffusion_steps = int(checkpoint["diffusion_steps"])
 
     obs = env.reset()
-    history = None
     rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    # Initialize history with clean initial obs before the loop
+    obs_vec = _flatten_obs(obs, obs_keys)
+    history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
+
+    prediction_type = checkpoint.get("prediction_type", "epsilon")
+    sampler = _sample_x0 if prediction_type == "x0" else sample_action_sequence
+    if prediction_type == "x0" and _sample_x0 is None:
+        raise RuntimeError("sample_action_sequence_x0 not found; check training/lift/ is on path")
+
     step = 0
     while step < horizon:
-        # Corrupt observation if alpha_s > 0
+        # Build noisy obs for policy query; keep obs pointing to clean env obs
         if alpha_s > 0.0:
-            obs = dict(obs)
+            noisy_obs = dict(obs)
             for key in obs_keys:
-                if key in obs:
-                    obs[key] = (
-                        np.asarray(obs[key], dtype=np.float32)
-                        + rng.normal(0, alpha_s, size=np.asarray(obs[key]).shape).astype(np.float32)
+                if key in noisy_obs:
+                    noisy_obs[key] = (
+                        np.asarray(noisy_obs[key], dtype=np.float32)
+                        + rng.normal(0, alpha_s, size=np.asarray(noisy_obs[key]).shape).astype(np.float32)
                     )
-
-        obs_vec = _flatten_obs(obs, obs_keys)
-        history = _prepare_history(obs_vec, obs_horizon, history)
+            obs_vec = _flatten_obs(noisy_obs, obs_keys)
+        else:
+            obs_vec = _flatten_obs(obs, obs_keys)
+        history.append(obs_vec.copy())
         obs_hist = np.stack(history, axis=0)
 
-        action_chunk = sample_action_sequence(
+        action_chunk = sampler(
             model=model,
             obs_history=obs_hist,
             obs_mean=obs_mean,
@@ -148,13 +165,13 @@ def _run_rollout(
         for action in action_chunk[:action_horizon]:
             if step >= horizon:
                 break
-
-            # Add action noise if alpha_a > 0
             if alpha_a > 0.0:
                 action = action + rng.normal(0, alpha_a, size=action.shape).astype(np.float32)
-
             obs, _, done, _ = env.step(np.clip(action, -1.0, 1.0))
             step += 1
+            # Update history with clean obs after each step (rolling window)
+            obs_vec = _flatten_obs(obs, obs_keys)
+            history.append(obs_vec.copy())
             if env.is_success()["task"]:
                 return True
             if done:
@@ -192,6 +209,7 @@ def _eval_noise_condition(
             alpha_a=alpha_a,
         )
         successes.append(success)
+        print(f"    Rollout {index+1:3d}/{n_rollouts}: {'SUCCESS' if success else 'FAILURE'}", flush=True)
     return float(np.mean(successes))
 
 
@@ -204,162 +222,173 @@ def _run_evaluation(
     horizon: int,
     base_seed: int,
     t_start: Optional[int],
+    mode: str = "all",
 ) -> dict:
     """
-    Run full evaluation under three noise modes.
-    
-    Returns:
-        {
-            "state_noise_only": {alpha_s: success_rate, ...},
-            "action_noise_only": {alpha_a: success_rate, ...},
-            "joint_noise": {(alpha_s, alpha_a): success_rate, ...},
-        }
+    Run evaluation under the selected noise mode(s).
+
+    mode: "state_only" | "action_only" | "joint" | "all"
+
+    Returns a dict containing only the keys for the modes that ran:
+        "state_noise_only": {alpha_s: success_rate, ...}
+        "action_noise_only": {alpha_a: success_rate, ...}
+        "joint_noise":       {(alpha_s, alpha_a): success_rate, ...}
     """
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, checkpoint, alphas, alphas_bar = load_lift_checkpoint(checkpoint_path, device)
-    env = _load_env(env_ckpt)
+    print(f"\nLoading checkpoint... {checkpoint_path}", flush=True)
+    model, checkpoint, alphas, alphas_bar = _load_checkpoint_any(checkpoint_path, device)
+    backbone = checkpoint.get("backbone", "mlp")
+    pred_type = checkpoint.get("prediction_type", "epsilon")
+    print(f"  backbone={backbone}  prediction_type={pred_type}  device={device}", flush=True)
 
-    results = {
-        "state_noise_only": {},
-        "action_noise_only": {},
-        "joint_noise": {},
-    }
+    results: dict = {}
 
-    # Mode 1: State noise only (alpha_a = 0)
-    print("\n" + "=" * 80)
-    print("MODE 1: STATE NOISE ONLY")
-    print("=" * 80)
-    for alpha_s in alpha_s_list:
-        print(f"  Evaluating alpha_s={alpha_s:.3f}...", end=" ", flush=True)
-        sr = _eval_noise_condition(
-            model, checkpoint, alphas, alphas_bar, env, horizon, base_seed, n_rollouts, t_start,
-            alpha_s=alpha_s, alpha_a=0.0
-        )
-        results["state_noise_only"][alpha_s] = sr
-        print(f"success_rate={sr:.4f}")
+    # Each mode gets a fresh env so all start from the same env RNG position.
 
-    # Mode 2: Action noise only (alpha_s = 0)
-    print("\n" + "=" * 80)
-    print("MODE 2: ACTION NOISE ONLY")
-    print("=" * 80)
-    for alpha_a in alpha_a_list:
-        print(f"  Evaluating alpha_a={alpha_a:.3f}...", end=" ", flush=True)
-        sr = _eval_noise_condition(
-            model, checkpoint, alphas, alphas_bar, env, horizon, base_seed, n_rollouts, t_start,
-            alpha_s=0.0, alpha_a=alpha_a
-        )
-        results["action_noise_only"][alpha_a] = sr
-        print(f"success_rate={sr:.4f}")
-
-    # Mode 3: Joint noise (alpha_s > 0, alpha_a > 0)
-    print("\n" + "=" * 80)
-    print("MODE 3: JOINT STATE + ACTION NOISE")
-    print("=" * 80)
-    total_cells = len(alpha_s_list) * len(alpha_a_list)
-    cell_idx = 0
-    for alpha_s in alpha_s_list:
-        for alpha_a in alpha_a_list:
-            cell_idx += 1
-            print(f"  [{cell_idx}/{total_cells}] alpha_s={alpha_s:.3f}, alpha_a={alpha_a:.3f}...", end=" ", flush=True)
+    if mode in ("state_only", "all"):
+        print("\n" + "=" * 80, flush=True)
+        print("MODE: STATE NOISE ONLY", flush=True)
+        print("=" * 80, flush=True)
+        print("Loading environment...", flush=True)
+        env = _load_env(env_ckpt)
+        state_results: dict = {}
+        for alpha_s in alpha_s_list:
+            print(f"  Evaluating alpha_s={alpha_s:.3f}...", end=" ", flush=True)
             sr = _eval_noise_condition(
                 model, checkpoint, alphas, alphas_bar, env, horizon, base_seed, n_rollouts, t_start,
-                alpha_s=alpha_s, alpha_a=alpha_a
+                alpha_s=alpha_s, alpha_a=0.0,
             )
-            results["joint_noise"][(alpha_s, alpha_a)] = sr
-            print(f"success_rate={sr:.4f}")
+            state_results[alpha_s] = sr
+            print(f"success_rate={sr:.4f}", flush=True)
+        results["state_noise_only"] = state_results
+
+    if mode in ("action_only", "all"):
+        print("\n" + "=" * 80, flush=True)
+        print("MODE: ACTION NOISE ONLY", flush=True)
+        print("=" * 80, flush=True)
+        print("Loading environment...", flush=True)
+        env = _load_env(env_ckpt)
+        action_results: dict = {}
+        for alpha_a in alpha_a_list:
+            print(f"  Evaluating alpha_a={alpha_a:.3f}...", end=" ", flush=True)
+            sr = _eval_noise_condition(
+                model, checkpoint, alphas, alphas_bar, env, horizon, base_seed, n_rollouts, t_start,
+                alpha_s=0.0, alpha_a=alpha_a,
+            )
+            action_results[alpha_a] = sr
+            print(f"success_rate={sr:.4f}", flush=True)
+        results["action_noise_only"] = action_results
+
+    if mode in ("joint", "all"):
+        print("\n" + "=" * 80, flush=True)
+        print("MODE: JOINT STATE + ACTION NOISE", flush=True)
+        print("=" * 80, flush=True)
+        print("Loading environment...", flush=True)
+        env = _load_env(env_ckpt)
+        joint_results: dict = {}
+        total_cells = len(alpha_s_list) * len(alpha_a_list)
+        cell_idx = 0
+        for alpha_s in alpha_s_list:
+            for alpha_a in alpha_a_list:
+                cell_idx += 1
+                print(
+                    f"  [{cell_idx}/{total_cells}] alpha_s={alpha_s:.3f}, alpha_a={alpha_a:.3f}...",
+                    end=" ", flush=True,
+                )
+                sr = _eval_noise_condition(
+                    model, checkpoint, alphas, alphas_bar, env, horizon, base_seed, n_rollouts, t_start,
+                    alpha_s=alpha_s, alpha_a=alpha_a,
+                )
+                joint_results[(alpha_s, alpha_a)] = sr
+                print(f"success_rate={sr:.4f}", flush=True)
+        results["joint_noise"] = joint_results
 
     return results
 
 
 def _save_results_csv(results: dict, output_csv: str):
-    """Save results to CSV file with three sheets."""
-    os.makedirs(os.path.dirname(output_csv), exist_ok=True)
-
-    # For simplicity, we'll create three separate CSVs
+    """Save one CSV per mode that was actually run."""
+    out_dir = os.path.dirname(output_csv)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     base_name = output_csv.replace(".csv", "")
+    saved: List[str] = []
 
-    # CSV 1: State noise only
-    with open(f"{base_name}_state_only.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["alpha_s", "success_rate"])
-        for alpha_s in sorted(results["state_noise_only"].keys()):
-            sr = results["state_noise_only"][alpha_s]
-            writer.writerow([f"{alpha_s:.3f}", f"{sr:.4f}"])
+    if "state_noise_only" in results:
+        path = f"{base_name}_state_only.csv"
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["alpha_s", "success_rate"])
+            for alpha_s in sorted(results["state_noise_only"].keys()):
+                writer.writerow([f"{alpha_s:.3f}", f"{results['state_noise_only'][alpha_s]:.4f}"])
+        saved.append(path)
 
-    # CSV 2: Action noise only
-    with open(f"{base_name}_action_only.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["alpha_a", "success_rate"])
-        for alpha_a in sorted(results["action_noise_only"].keys()):
-            sr = results["action_noise_only"][alpha_a]
-            writer.writerow([f"{alpha_a:.3f}", f"{sr:.4f}"])
+    if "action_noise_only" in results:
+        path = f"{base_name}_action_only.csv"
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["alpha_a", "success_rate"])
+            for alpha_a in sorted(results["action_noise_only"].keys()):
+                writer.writerow([f"{alpha_a:.3f}", f"{results['action_noise_only'][alpha_a]:.4f}"])
+        saved.append(path)
 
-    # CSV 3: Joint noise (pivot table format)
-    with open(f"{base_name}_joint.csv", "w", newline="") as f:
-        # Get unique values sorted
+    if "joint_noise" in results:
+        path = f"{base_name}_joint.csv"
         alpha_s_vals = sorted(set(k[0] for k in results["joint_noise"].keys()))
         alpha_a_vals = sorted(set(k[1] for k in results["joint_noise"].keys()))
-
-        # Write header
-        writer = csv.writer(f)
-        writer.writerow(["alpha_s / alpha_a"] + [f"{a:.3f}" for a in alpha_a_vals])
-
-        # Write rows
-        for alpha_s in alpha_s_vals:
-            row = [f"{alpha_s:.3f}"]
-            for alpha_a in alpha_a_vals:
-                sr = results["joint_noise"].get((alpha_s, alpha_a), None)
-                row.append(f"{sr:.4f}" if sr is not None else "—")
-            writer.writerow(row)
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["alpha_s \\ alpha_a"] + [f"{a:.3f}" for a in alpha_a_vals])
+            for alpha_s in alpha_s_vals:
+                row = [f"{alpha_s:.3f}"]
+                for alpha_a in alpha_a_vals:
+                    sr = results["joint_noise"].get((alpha_s, alpha_a))
+                    row.append(f"{sr:.4f}" if sr is not None else "")
+                writer.writerow(row)
+        saved.append(path)
 
     print(f"\nSaved results to:")
-    print(f"  {base_name}_state_only.csv")
-    print(f"  {base_name}_action_only.csv")
-    print(f"  {base_name}_joint.csv")
+    for p in saved:
+        print(f"  {p}")
 
 
 def _print_summary(results: dict):
-    """Print summary tables to console."""
-    # Summary 1: State noise only
-    print("\n" + "=" * 80)
-    print("SUMMARY: STATE NOISE ONLY")
-    print("=" * 80)
-    print(f"{'alpha_s':>10}  {'success_rate':>15}")
-    print("-" * 30)
-    for alpha_s in sorted(results["state_noise_only"].keys()):
-        sr = results["state_noise_only"][alpha_s]
-        print(f"{alpha_s:>10.3f}  {sr:>15.4f}")
+    """Print summary tables to console (only for modes that were run)."""
+    if "state_noise_only" in results:
+        print("\n" + "=" * 80)
+        print("SUMMARY: STATE NOISE ONLY")
+        print("=" * 80)
+        print(f"{'alpha_s':>10}  {'success_rate':>15}")
+        print("-" * 30)
+        for alpha_s in sorted(results["state_noise_only"].keys()):
+            print(f"{alpha_s:>10.3f}  {results['state_noise_only'][alpha_s]:>15.4f}")
 
-    # Summary 2: Action noise only
-    print("\n" + "=" * 80)
-    print("SUMMARY: ACTION NOISE ONLY")
-    print("=" * 80)
-    print(f"{'alpha_a':>10}  {'success_rate':>15}")
-    print("-" * 30)
-    for alpha_a in sorted(results["action_noise_only"].keys()):
-        sr = results["action_noise_only"][alpha_a]
-        print(f"{alpha_a:>10.3f}  {sr:>15.4f}")
+    if "action_noise_only" in results:
+        print("\n" + "=" * 80)
+        print("SUMMARY: ACTION NOISE ONLY")
+        print("=" * 80)
+        print(f"{'alpha_a':>10}  {'success_rate':>15}")
+        print("-" * 30)
+        for alpha_a in sorted(results["action_noise_only"].keys()):
+            print(f"{alpha_a:>10.3f}  {results['action_noise_only'][alpha_a]:>15.4f}")
 
-    # Summary 3: Joint noise (pivot table)
-    print("\n" + "=" * 80)
-    print("SUMMARY: JOINT STATE + ACTION NOISE")
-    print("=" * 80)
-    alpha_s_vals = sorted(set(k[0] for k in results["joint_noise"].keys()))
-    alpha_a_vals = sorted(set(k[1] for k in results["joint_noise"].keys()))
-
-    print(f"{'alpha_s / alpha_a':>12}" + "".join(f"  {a:>10.3f}" for a in alpha_a_vals))
-    print("-" * (12 + 12 * len(alpha_a_vals)))
-    for alpha_s in alpha_s_vals:
-        row = f"{alpha_s:>12.3f}"
-        for alpha_a in alpha_a_vals:
-            sr = results["joint_noise"].get((alpha_s, alpha_a), None)
-            if sr is not None:
-                row += f"  {sr:>10.4f}"
-            else:
-                row += f"  {'—':>10}"
-        print(row)
+    if "joint_noise" in results:
+        print("\n" + "=" * 80)
+        print("SUMMARY: JOINT STATE + ACTION NOISE")
+        print("=" * 80)
+        alpha_s_vals = sorted(set(k[0] for k in results["joint_noise"].keys()))
+        alpha_a_vals = sorted(set(k[1] for k in results["joint_noise"].keys()))
+        header = "alpha_s \\ alpha_a"
+        print(f"{header:>17}" + "".join(f"  {a:>10.3f}" for a in alpha_a_vals))
+        print("-" * (17 + 12 * len(alpha_a_vals)))
+        for alpha_s in alpha_s_vals:
+            row = f"{alpha_s:>17.3f}"
+            for alpha_a in alpha_a_vals:
+                sr = results["joint_noise"].get((alpha_s, alpha_a))
+                row += f"  {sr:>10.4f}" if sr is not None else f"  {'—':>10}"
+            print(row)
 
 
 def parse_args():
@@ -396,7 +425,14 @@ def parse_args():
         "--output_csv",
         type=str,
         required=True,
-        help="Base path for output CSV files",
+        help="Base path for output CSV files (suffix _state_only/_action_only/_joint appended per mode)",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="all",
+        choices=["state_only", "action_only", "joint", "all"],
+        help="Which noise mode(s) to evaluate (default: all)",
     )
     return parser.parse_args()
 
@@ -423,16 +459,17 @@ def main():
         print(f"Error: Env checkpoint not found: {env_ckpt}")
         return 1
 
-    print("=" * 80)
-    print("DIFFUSION POLICY NOISE MODES EVALUATION")
-    print("=" * 80)
-    print(f"Checkpoint:    {checkpoint_path}")
-    print(f"Env checkpoint: {env_ckpt}")
-    print(f"State noise levels (alpha_s): {args.alpha_s}")
-    print(f"Action noise levels (alpha_a): {args.alpha_a}")
-    print(f"Rollouts per condition: {args.n_rollouts}")
-    print(f"Horizon: {args.horizon}")
-    print(f"Seed: {args.seed}")
+    print("=" * 80, flush=True)
+    print("DIFFUSION POLICY NOISE MODES EVALUATION", flush=True)
+    print("=" * 80, flush=True)
+    print(f"Checkpoint:    {checkpoint_path}", flush=True)
+    print(f"Env checkpoint: {env_ckpt}", flush=True)
+    print(f"Mode:           {args.mode}", flush=True)
+    print(f"State noise levels (alpha_s): {args.alpha_s}", flush=True)
+    print(f"Action noise levels (alpha_a): {args.alpha_a}", flush=True)
+    print(f"Rollouts per condition: {args.n_rollouts}", flush=True)
+    print(f"Horizon: {args.horizon}", flush=True)
+    print(f"Seed: {args.seed}", flush=True)
 
     configure_mujoco_env(verbose=False)
 
@@ -446,6 +483,7 @@ def main():
         horizon=args.horizon,
         base_seed=args.seed,
         t_start=args.t_start,
+        mode=args.mode,
     )
 
     # Print and save results

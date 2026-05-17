@@ -74,7 +74,7 @@ DEFAULT_ENV_CKPT = find_default_env_ckpt()
 def _load_checkpoint(checkpoint_path: str, device: torch.device):
     ckpt     = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     backbone = ckpt.get("backbone", "mlp")
-    if backbone == "unet":
+    if backbone in ("unet", "unet_samdp"):
         from diffusion.lift_policy_unet import load_unet_checkpoint
         return load_unet_checkpoint(checkpoint_path, device)
     elif backbone == "transformer":
