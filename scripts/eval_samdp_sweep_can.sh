@@ -1,34 +1,32 @@
 #!/usr/bin/env bash
-# Evaluate vanilla UNet vs SA-MDP variants under obs noise.
+# Evaluate vanilla UNet vs SA-MDP variants under obs noise — CAN task.
 # Run from the project root inside the vla_marl conda env:
-#   bash scripts/eval_samdp_sweep.sh
+#   bash scripts/eval_samdp_sweep_can.sh
 
 set -euo pipefail
 
 PYTHON="${PYTHON:-/home/axs0940/miniconda3/envs/vla_marl/bin/python}"
 
-RESULTS_DIR="results/lift/samdp_comparison"
+RESULTS_DIR="results/can/samdp_comparison"
 mkdir -p "$RESULTS_DIR"
 
-# Noise levels for the sweep (space-separated, passed as --alpha_s / --alpha_a).
-# The dominant eval point is 0.05, matching aug_alpha_s_max and SA-MDP sigma_max.
+# Noise levels for the sweep (space-separated).
 ALPHA_S="0.0 0.01 0.02 0.03 0.04 0.05 0.1 0.2"
 ALPHA_A="0.0 0.05 0.1 0.2"
 N_ROLLOUTS=25
 
 # Which mode(s) to run: state_only | action_only | joint | all
-# Set to "state_only" for a quick state-noise-only sweep; "all" for the full grid.
 MODE="state_only"
 
 declare -A CHECKPOINTS=(
-    ["vanilla"]="checkpoints/lift_diffusion_policy_v5/best_model.pt"
-    ["samdp_k03"]="checkpoints/lift_samdp_k03/best_model.pt"
-    # ["samdp_k10"]="checkpoints/lift_samdp_k10/best_model.pt"   # train first
-    # ["samdp_k30"]="checkpoints/lift_samdp_k30/best_model.pt"   # train first
+    ["vanilla"]="checkpoints/can_diffusion_policy_unet/best_model.pt"
+    ["samdp_k03"]="checkpoints/can_samdp_k03/best_model.pt"
+    # ["samdp_k10"]="checkpoints/can_samdp_k10/best_model.pt"   # train first
+    # ["samdp_k30"]="checkpoints/can_samdp_k30/best_model.pt"   # train first
 )
 
 echo "============================================================"
-echo "SA-MDP evaluation sweep"
+echo "SA-MDP evaluation sweep — CAN task"
 echo "mode:       $MODE"
 echo "alpha_s:    $ALPHA_S"
 echo "alpha_a:    $ALPHA_A"
@@ -51,13 +49,13 @@ for TAG in "${!CHECKPOINTS[@]}"; do
     echo "  Checkpoint: $CKPT"
     echo "------------------------------------------------------------"
 
-    "$PYTHON" -u evaluation/eval_noise_modes.py \
+    "$PYTHON" -u evaluation/eval_noise_modes_can.py \
         --checkpoint "$CKPT" \
         --alpha_s $ALPHA_S \
         --alpha_a $ALPHA_A \
         --n_rollouts "$N_ROLLOUTS" \
         --mode "$MODE" \
-        --output_csv "$RESULTS_DIR/${TAG}_sweep.csv"
+        --output_csv "$RESULTS_DIR/${TAG}_sweep"
 done
 
 echo ""
