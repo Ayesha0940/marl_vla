@@ -74,8 +74,16 @@ def parse_args():
                         "model learns to pull off-manifold inputs back to clean.")
     p.add_argument("--gripper_k", type=int, default=5,
                    help="Gripper history length K for A2/A6/A8. Default: 5")
-    p.add_argument("--channel_sizes", type=str, default="64,128,256",
-                   help="U-Net channel sizes c0,c1,c2. Default: 64,128,256")
+    p.add_argument("--d_model", type=int, default=192,
+                   help="Cross-attention model dimension. Default: 192")
+    p.add_argument("--n_heads", type=int, default=6,
+                   help="Number of attention heads. Default: 6")
+    p.add_argument("--n_layers", type=int, default=4,
+                   help="Number of cross-stream blocks. Default: 4")
+    p.add_argument("--lam_dyn", type=float, default=0.05,
+                   help="Forward-dynamics auxiliary loss weight (R²=0.57). Default: 0.05")
+    p.add_argument("--lam_inv", type=float, default=0.30,
+                   help="Inverse-dynamics auxiliary loss weight (R²=0.89). Default: 0.30")
     p.add_argument("--output_path", type=str, default=None,
                    help="Output .pt path. Default: diffusion_models/joint_<anchor>_lift.pt")
     p.add_argument("--device", type=str, default="auto",
@@ -102,9 +110,6 @@ def main():
     if args.output_path is None:
         os.makedirs("diffusion_models", exist_ok=True)
         args.output_path = f"diffusion_models/joint_{args.anchor.lower()}_lift.pt"
-
-    channel_sizes = tuple(int(x) for x in args.channel_sizes.split(","))
-    assert len(channel_sizes) == 3, "--channel_sizes must be three comma-separated ints"
 
     # ── Auto-detect obs_keys from BC-RNN checkpoint ────────────────────────────
     print(f"\nLoading obs_keys from BC-RNN checkpoint: {args.bc_rnn_ckpt}")
@@ -144,16 +149,17 @@ def main():
                         num_workers=2, pin_memory=(device.type == "cuda"))
 
     # ── Model + Anchor ─────────────────────────────────────────────────────────
-    from diffusion.joint_unet import JointUNet1D
+    from diffusion.joint_cross_attn import CrossAttnJointDenoiser, cross_attn_joint_loss
     from diffusion.anchors import build_anchor
     from diffusion.model import make_beta_schedule
 
-    model = JointUNet1D(
-        state_dim     = ds.state_dim,
-        action_dim    = ds.action_dim,
-        anchor_dim    = 128,
-        time_emb_dim  = 128,
-        channel_sizes = channel_sizes,
+    model = CrossAttnJointDenoiser(
+        state_dim  = ds.state_dim,
+        action_dim = ds.action_dim,
+        anchor_dim = 128,
+        d_model    = args.d_model,
+        n_heads    = args.n_heads,
+        n_layers   = args.n_layers,
     ).to(device)
 
     anchor = build_anchor(
@@ -167,7 +173,7 @@ def main():
                sum(p.numel() for p in anchor.parameters())
     print(f"\nModel params: {n_params:,}")
     print(f"Anchor:       {args.anchor}")
-    print(f"Channel sizes:{channel_sizes}")
+    print(f"d_model:      {args.d_model}  n_heads: {args.n_heads}  n_layers: {args.n_layers}")
 
     # ── Diffusion schedule ────────────────────────────────────────────────────
     _, alphas, alphas_bar = make_beta_schedule(args.diffusion_steps)
@@ -179,8 +185,6 @@ def main():
         lr=args.lr,
     )
 
-    from diffusion.joint_unet import joint_diffusion_loss
-
     print(f"\nTraining")
     print(f"  epochs:          {args.epochs}")
     print(f"  batch_size:      {args.batch_size}")
@@ -188,6 +192,8 @@ def main():
     print(f"  horizon H:       {args.horizon}")
     print(f"  lr:              {args.lr}")
     print(f"  lam:             {args.lam if args.lam is not None else 'auto (Da/Ds)'}")
+    print(f"  lam_dyn:         {args.lam_dyn}")
+    print(f"  lam_inv:         {args.lam_inv}")
     print(f"  aug_alpha_s_max: {args.aug_alpha_s_max}")
     print(f"  aug_alpha_a_max: {args.aug_alpha_a_max}")
     print(f"  noise_schedule:  {args.noise_schedule}")
@@ -200,7 +206,7 @@ def main():
     for epoch in range(1, args.epochs + 1):
         model.train()
         anchor.train()
-        epoch_total = epoch_la = epoch_ls = 0.0
+        epoch_total = epoch_la = epoch_ls = epoch_ldyn = epoch_linv = 0.0
         n_batches = 0
 
         for batch in loader:
@@ -218,11 +224,13 @@ def main():
             # Forward process from noisy x0.
             # With warm-start separation (default): eps target recovers CLEAN x0.
             # Without (--no_warm_start): standard DDPM, eps target is noisy x0.
-            total, la, ls = joint_diffusion_loss(
+            total, la, ls, ldyn, linv = cross_attn_joint_loss(
                 model, x0_state_noisy, x0_action_noisy, anchor_emb, alphas_bar,
-                lam=args.lam,
-                x0_state_clean=None if args.no_warm_start else x0_state_clean,
-                x0_action_clean=None if args.no_warm_start else x0_action_clean,
+                lam     = args.lam,
+                lam_dyn = args.lam_dyn,
+                lam_inv = args.lam_inv,
+                x0_state_clean  = None if args.no_warm_start else x0_state_clean,
+                x0_action_clean = None if args.no_warm_start else x0_action_clean,
             )
 
             optimizer.zero_grad()
@@ -235,11 +243,15 @@ def main():
             epoch_total += total.item()
             epoch_la    += la.item()
             epoch_ls    += ls.item()
+            epoch_ldyn  += ldyn.item()
+            epoch_linv  += linv.item()
             n_batches   += 1
 
         epoch_total /= n_batches
         epoch_la    /= n_batches
         epoch_ls    /= n_batches
+        epoch_ldyn  /= n_batches
+        epoch_linv  /= n_batches
 
         if epoch_total < best_loss:
             best_loss  = epoch_total
@@ -250,8 +262,8 @@ def main():
 
         if epoch % args.log_every == 0 or epoch == 1:
             print(f"  Epoch {epoch:4d}/{args.epochs} | "
-                  f"total={epoch_total:.5f}  loss_a={epoch_la:.5f}  loss_s={epoch_ls:.5f} | "
-                  f"best={best_loss:.5f}")
+                  f"total={epoch_total:.5f}  la={epoch_la:.5f}  ls={epoch_ls:.5f}  "
+                  f"ldyn={epoch_ldyn:.5f}  linv={epoch_linv:.5f} | best={best_loss:.5f}")
 
     # ── Save checkpoint ────────────────────────────────────────────────────────
     os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
@@ -263,13 +275,17 @@ def main():
             "model_state_dict":  best_state["model"],
             "anchor_state_dict": best_state["anchor"],
             # Architecture
+            "arch":              "cross_attn",
             "state_dim":         ds.state_dim,
             "action_dim":        ds.action_dim,
             "horizon":           args.horizon,
             "diffusion_steps":   args.diffusion_steps,
-            "channel_sizes":     channel_sizes,
             "anchor_dim":        128,
-            "time_emb_dim":      128,
+            "d_model":           args.d_model,
+            "n_heads":           args.n_heads,
+            "n_layers":          args.n_layers,
+            "lam_dyn":           args.lam_dyn,
+            "lam_inv":           args.lam_inv,
             # Anchor meta
             "anchor_id":         args.anchor,
             "object_dim":        ds.object_dim,

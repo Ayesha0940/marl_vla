@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(python3 -c ' *)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(grep -E \"\\\\.\\(py|json\\)$\")",
+      "Bash(python -c \"import diffusion.joint_cross_attn; print\\('joint_cross_attn OK'\\)\")",
+      "Bash(python -m py_compile diffusion/train_joint_denoiser.py)"
     ]
   }
 }

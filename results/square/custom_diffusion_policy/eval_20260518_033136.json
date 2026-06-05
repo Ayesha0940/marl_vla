@@ -1,0 +1,20 @@
+{
+    "results": [
+        {
+            "checkpoint": "checkpoints/square_diffusion_policy_unet/best_model.pt",
+            "success_rate": 0.78,
+            "n_success": 39,
+            "n_rollouts": 50
+        }
+    ],
+    "config": {
+        "agent": "checkpoints/square_diffusion_policy_unet/best_model.pt",
+        "sweep": null,
+        "env_ckpt": "/home/axs0940/marl_vla/checkpoints/bc_rnn_square/bc_rnn_square/20260410202137/models/model_epoch_100.pth",
+        "n_rollouts": 50,
+        "horizon": 500,
+        "seed": 0,
+        "t_start": null,
+        "exec_horizon": null
+    }
+}

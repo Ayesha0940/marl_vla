@@ -91,9 +91,8 @@ def _prepare_history(obs_vec: np.ndarray, obs_horizon: int, history: Optional[de
 
 
 def _load_joint_model(ckpt_path: str, device):
-    """Load joint denoiser model from checkpoint."""
+    """Load joint denoiser model from checkpoint (JointUNet1D or CrossAttnJointDenoiser)."""
     import torch
-    from diffusion.joint_unet import JointUNet1D
     from diffusion.anchors import build_anchor
     from diffusion.model import make_beta_schedule
 
@@ -105,13 +104,25 @@ def _load_joint_model(ckpt_path: str, device):
     T = ckpt["diffusion_steps"]
     anchor_id = ckpt["anchor_id"]
 
-    model = JointUNet1D(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        anchor_dim=ckpt.get("anchor_dim", 128),
-        time_emb_dim=ckpt.get("time_emb_dim", 128),
-        channel_sizes=ckpt.get("channel_sizes", (64, 128, 256)),
-    )
+    if ckpt.get("arch") == "cross_attn":
+        from diffusion.joint_cross_attn import CrossAttnJointDenoiser
+        model = CrossAttnJointDenoiser(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            anchor_dim=ckpt.get("anchor_dim", 128),
+            d_model=ckpt.get("d_model", 192),
+            n_heads=ckpt.get("n_heads", 6),
+            n_layers=ckpt.get("n_layers", 4),
+        )
+    else:
+        from diffusion.joint_unet import JointUNet1D
+        model = JointUNet1D(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            anchor_dim=ckpt.get("anchor_dim", 128),
+            time_emb_dim=ckpt.get("time_emb_dim", 128),
+            channel_sizes=ckpt.get("channel_sizes", (64, 128, 256)),
+        )
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval().to(device)
 
@@ -207,6 +218,7 @@ def _run_rollout_with_denoiser(
     joint_obs_keys: Optional[list] = None,
     alpha_s: float = 0.0,
     alpha_a: float = 0.0,
+    joint_t_start: int = 10,
     prediction_type: str = "epsilon",
 ) -> bool:
     """
@@ -221,6 +233,7 @@ def _run_rollout_with_denoiser(
     """
     import torch
     from diffusion.joint_unet import joint_denoise
+    from diffusion.joint_cross_attn import cross_attn_joint_denoise, CrossAttnJointDenoiser
 
     device = next(diffusion_model.parameters()).device
     obs_keys = list(diffusion_checkpoint.get("obs_keys") or DEFAULT_OBS_KEYS)
@@ -233,10 +246,10 @@ def _run_rollout_with_denoiser(
     action_horizon = int(diffusion_checkpoint["action_horizon"])
     diffusion_steps = int(diffusion_checkpoint["diffusion_steps"])
 
-    obs = env.reset()
-    rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    obs = env.reset()
 
     obs_vec = _flatten_obs(obs, obs_keys)
     history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
@@ -347,14 +360,19 @@ def _run_rollout_with_denoiser(
                 anchor_emb = joint_anchor.compute(traj)
 
                 # Apply joint denoiser
-                _, clean_a = joint_denoise(
+                _denoise_fn = (
+                    cross_attn_joint_denoise
+                    if isinstance(joint_model, CrossAttnJointDenoiser)
+                    else joint_denoise
+                )
+                _, clean_a = _denoise_fn(
                     joint_model,
                     s_t,
                     a_t,
                     anchor_emb,
                     joint_alphas,
                     joint_alphas_bar,
-                    t_start=10,
+                    t_start=joint_t_start,
                 )
 
             # Denormalize and use denoised action
@@ -401,10 +419,10 @@ def _run_rollout_baseline(
     action_horizon = int(diffusion_checkpoint["action_horizon"])
     diffusion_steps = int(diffusion_checkpoint["diffusion_steps"])
 
-    obs = env.reset()
-    rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    obs = env.reset()
 
     obs_vec = _flatten_obs(obs, obs_keys)
     history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
@@ -489,6 +507,7 @@ def _eval_condition(
     joint_state_dim=None,
     joint_action_dim=None,
     joint_obs_keys=None,
+    joint_t_start: int = 10,
 ) -> float:
     """Evaluate success rate for a condition."""
     successes = []
@@ -530,6 +549,7 @@ def _eval_condition(
                 joint_obs_keys=joint_obs_keys,
                 alpha_s=alpha_s,
                 alpha_a=alpha_a,
+                joint_t_start=joint_t_start,
                 prediction_type=prediction_type,
             )
         successes.append(success)
@@ -589,6 +609,7 @@ def parse_args():
     parser.add_argument("--horizon", type=int, default=400, help="Episode horizon")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--t_start", type=int, default=None, help="Diffusion t_start parameter")
+    parser.add_argument("--joint_t_start", type=int, nargs="+", default=[10], help="Joint denoiser reverse-diffusion start step(s). Multiple values sweep t_start per cell (default: 10)")
     parser.add_argument(
         "--output_csv",
         type=str,
@@ -680,7 +701,11 @@ def main():
 
     # Prepare results structure
     results = {}
-    col_names = ["BASELINE (diffusion only)"] + list(joint_models.keys())
+    joint_t_starts = args.joint_t_start  # list of ints
+    col_names = (
+        ["BASELINE (diffusion only)"]
+        + [f"{k}_t{ts}" for k in sorted(joint_models.keys()) for ts in joint_t_starts]
+    )
 
     # Evaluation loop
     print("\n" + "=" * 90)
@@ -717,40 +742,43 @@ def main():
             results[key]["BASELINE (diffusion only)"] = sr_baseline
             print(f"success_rate={sr_baseline:.4f}")
 
-            # With joint denoisers
+            # With joint denoisers — load each model once, sweep t_start values
             for model_key, model_path in sorted(joint_models.items()):
-                print(f"  {model_key}...", end=" ", flush=True)
                 try:
                     jm, ja, ja_alphas, ja_alphas_bar, ja_norm, ja_h, ja_s_dim, ja_a_dim, ja_obs_keys = _load_joint_model(model_path, device)
-
-                    sr = _eval_condition(
-                        diffusion_model,
-                        diffusion_checkpoint_dict,
-                        diffusion_alphas,
-                        diffusion_alphas_bar,
-                        env,
-                        args.horizon,
-                        args.seed,
-                        args.n_rollouts,
-                        args.t_start,
-                        alpha_s,
-                        alpha_a,
-                        prediction_type=prediction_type,
-                        joint_model=jm,
-                        joint_anchor=ja,
-                        joint_alphas=ja_alphas,
-                        joint_alphas_bar=ja_alphas_bar,
-                        joint_norm=ja_norm,
-                        joint_horizon=ja_h,
-                        joint_state_dim=ja_s_dim,
-                        joint_action_dim=ja_a_dim,
-                        joint_obs_keys=ja_obs_keys,
-                    )
-                    results[key][model_key] = sr
-                    print(f"success_rate={sr:.4f}")
+                    for ts in joint_t_starts:
+                        col_key = f"{model_key}_t{ts}"
+                        print(f"  {col_key}...", end=" ", flush=True)
+                        sr = _eval_condition(
+                            diffusion_model,
+                            diffusion_checkpoint_dict,
+                            diffusion_alphas,
+                            diffusion_alphas_bar,
+                            env,
+                            args.horizon,
+                            args.seed,
+                            args.n_rollouts,
+                            args.t_start,
+                            alpha_s,
+                            alpha_a,
+                            prediction_type=prediction_type,
+                            joint_t_start=ts,
+                            joint_model=jm,
+                            joint_anchor=ja,
+                            joint_alphas=ja_alphas,
+                            joint_alphas_bar=ja_alphas_bar,
+                            joint_norm=ja_norm,
+                            joint_horizon=ja_h,
+                            joint_state_dim=ja_s_dim,
+                            joint_action_dim=ja_a_dim,
+                            joint_obs_keys=ja_obs_keys,
+                        )
+                        results[key][col_key] = sr
+                        print(f"success_rate={sr:.4f}")
                 except Exception as e:
-                    print(f"ERROR: {e}")
-                    results[key][model_key] = None
+                    print(f"ERROR loading {model_key}: {e}")
+                    for ts in joint_t_starts:
+                        results[key][f"{model_key}_t{ts}"] = None
 
     # Save results
     os.makedirs(os.path.dirname(os.path.abspath(args.output_csv)), exist_ok=True)

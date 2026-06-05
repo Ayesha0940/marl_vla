@@ -191,6 +191,7 @@ def _run_rollout_with_denoiser(
     joint_obs_keys: Optional[list] = None,
     alpha_s: float = 0.0,
     alpha_a: float = 0.0,
+    joint_t_start: int = 10,
     exec_horizon: int = 2,
     sample_fn=None,
 ) -> bool:
@@ -210,10 +211,10 @@ def _run_rollout_with_denoiser(
     obs_horizon = int(diffusion_checkpoint["obs_horizon"])
     diffusion_steps = int(diffusion_checkpoint["diffusion_steps"])
 
-    obs = env.reset()
-    rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    obs = env.reset()
 
     obs_vec = _flatten_obs(obs, obs_keys)
     history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
@@ -305,7 +306,7 @@ def _run_rollout_with_denoiser(
                     anchor_emb,
                     joint_alphas,
                     joint_alphas_bar,
-                    t_start=10,
+                    t_start=joint_t_start,
                 )
 
             clean_a_np = clean_a[0, -1].cpu().numpy()
@@ -352,10 +353,10 @@ def _run_rollout_baseline(
     obs_horizon = int(diffusion_checkpoint["obs_horizon"])
     diffusion_steps = int(diffusion_checkpoint["diffusion_steps"])
 
-    obs = env.reset()
-    rng = np.random.default_rng(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    obs = env.reset()
 
     obs_vec = _flatten_obs(obs, obs_keys)
     history = deque([obs_vec.copy()] * obs_horizon, maxlen=obs_horizon)
@@ -422,6 +423,7 @@ def _eval_condition(
     joint_state_dim=None,
     joint_action_dim=None,
     joint_obs_keys=None,
+    joint_t_start: int = 10,
     sample_fn=None,
 ) -> float:
     successes = []
@@ -440,8 +442,8 @@ def _eval_condition(
                 joint_model, joint_anchor, joint_alphas, joint_alphas_bar,
                 joint_norm, joint_horizon, joint_state_dim, joint_action_dim,
                 joint_obs_keys=joint_obs_keys,
-                alpha_s=alpha_s, alpha_a=alpha_a, exec_horizon=exec_horizon,
-                sample_fn=sample_fn,
+                alpha_s=alpha_s, alpha_a=alpha_a, joint_t_start=joint_t_start,
+                exec_horizon=exec_horizon, sample_fn=sample_fn,
             )
         successes.append(success)
 
@@ -478,6 +480,7 @@ def parse_args():
     parser.add_argument("--horizon", type=int, default=400, help="Episode horizon")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--t_start", type=int, default=None, help="Diffusion t_start parameter")
+    parser.add_argument("--joint_t_start", type=int, default=10, help="Joint denoiser reverse-diffusion start step (default 10)")
     parser.add_argument("--output_csv", type=str, required=True, help="Output CSV path")
     return parser.parse_args()
 
@@ -570,6 +573,7 @@ def main():
                 diffusion_alphas, diffusion_alphas_bar,
                 env, args.horizon, args.seed, args.n_rollouts, args.t_start,
                 alpha_s, alpha_a, exec_horizon=args.exec_horizon,
+                joint_t_start=args.joint_t_start,
                 sample_fn=sample_fn,
             )
             results[key]["BASELINE (diffusion only)"] = sr_baseline
@@ -586,6 +590,7 @@ def main():
                         diffusion_alphas, diffusion_alphas_bar,
                         env, args.horizon, args.seed, args.n_rollouts, args.t_start,
                         alpha_s, alpha_a, exec_horizon=args.exec_horizon,
+                        joint_t_start=args.joint_t_start,
                         joint_model=jm, joint_anchor=ja,
                         joint_alphas=ja_alphas, joint_alphas_bar=ja_alphas_bar,
                         joint_norm=ja_norm, joint_horizon=ja_h,
