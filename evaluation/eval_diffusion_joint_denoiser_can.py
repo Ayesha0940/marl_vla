@@ -104,13 +104,24 @@ def _load_joint_model(ckpt_path: str, device):
     T = ckpt["diffusion_steps"]
     anchor_id = ckpt["anchor_id"]
 
-    model = JointUNet1D(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        anchor_dim=ckpt.get("anchor_dim", 128),
-        time_emb_dim=ckpt.get("time_emb_dim", 128),
-        channel_sizes=ckpt.get("channel_sizes", (64, 128, 256)),
-    )
+    if ckpt.get("arch") == "cross_attn":
+        from diffusion.joint_cross_attn import CrossAttnJointDenoiser
+        model = CrossAttnJointDenoiser(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            anchor_dim=ckpt.get("anchor_dim", 128),
+            d_model=ckpt.get("d_model", 192),
+            n_heads=ckpt.get("n_heads", 6),
+            n_layers=ckpt.get("n_layers", 4),
+        )
+    else:
+        model = JointUNet1D(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            anchor_dim=ckpt.get("anchor_dim", 128),
+            time_emb_dim=ckpt.get("time_emb_dim", 128),
+            channel_sizes=ckpt.get("channel_sizes", (64, 128, 256)),
+        )
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval().to(device)
 
@@ -197,6 +208,7 @@ def _run_rollout_with_denoiser(
 ) -> bool:
     import torch
     from diffusion.joint_unet import joint_denoise
+    from diffusion.joint_cross_attn import cross_attn_joint_denoise, CrossAttnJointDenoiser
 
     if sample_fn is None:
         sample_fn = sample_action_sequence
@@ -299,7 +311,12 @@ def _run_rollout_with_denoiser(
 
             with torch.no_grad():
                 anchor_emb = joint_anchor.compute(traj)
-                _, clean_a = joint_denoise(
+                _denoise_fn = (
+                    cross_attn_joint_denoise
+                    if isinstance(joint_model, CrossAttnJointDenoiser)
+                    else joint_denoise
+                )
+                _, clean_a = _denoise_fn(
                     joint_model,
                     s_t,
                     a_t,
@@ -480,7 +497,8 @@ def parse_args():
     parser.add_argument("--horizon", type=int, default=400, help="Episode horizon")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--t_start", type=int, default=None, help="Diffusion t_start parameter")
-    parser.add_argument("--joint_t_start", type=int, default=10, help="Joint denoiser reverse-diffusion start step (default 10)")
+    parser.add_argument("--joint_t_start", type=int, nargs="+", default=[10],
+                        help="Joint denoiser reverse-diffusion start step(s). Multiple values sweep t_start per cell (default: 10)")
     parser.add_argument("--output_csv", type=str, required=True, help="Output CSV path")
     return parser.parse_args()
 
@@ -550,7 +568,11 @@ def main():
         print(f"Warning: No joint denoiser models found — running baseline only.")
 
     results = {}
-    col_names = ["BASELINE (diffusion only)"] + list(joint_models.keys())
+    joint_t_starts = args.joint_t_start
+    col_names = (
+        ["BASELINE (diffusion only)"]
+        + [f"{k}_t{ts}" for k in sorted(joint_models.keys()) for ts in joint_t_starts]
+    )
 
     print("\n" + "=" * 90)
     print("EVALUATION")
@@ -573,36 +595,37 @@ def main():
                 diffusion_alphas, diffusion_alphas_bar,
                 env, args.horizon, args.seed, args.n_rollouts, args.t_start,
                 alpha_s, alpha_a, exec_horizon=args.exec_horizon,
-                joint_t_start=args.joint_t_start,
                 sample_fn=sample_fn,
             )
             results[key]["BASELINE (diffusion only)"] = sr_baseline
             print(f"success_rate={sr_baseline:.4f}")
 
             for model_key, model_path in sorted(joint_models.items()):
-                print(f"  {model_key}...", end=" ", flush=True)
                 try:
                     jm, ja, ja_alphas, ja_alphas_bar, ja_norm, ja_h, ja_s_dim, ja_a_dim, ja_obs_keys = \
                         _load_joint_model(model_path, device)
-
-                    sr = _eval_condition(
-                        diffusion_model, diffusion_checkpoint_dict,
-                        diffusion_alphas, diffusion_alphas_bar,
-                        env, args.horizon, args.seed, args.n_rollouts, args.t_start,
-                        alpha_s, alpha_a, exec_horizon=args.exec_horizon,
-                        joint_t_start=args.joint_t_start,
-                        joint_model=jm, joint_anchor=ja,
-                        joint_alphas=ja_alphas, joint_alphas_bar=ja_alphas_bar,
-                        joint_norm=ja_norm, joint_horizon=ja_h,
-                        joint_state_dim=ja_s_dim, joint_action_dim=ja_a_dim,
-                        joint_obs_keys=ja_obs_keys,
-                        sample_fn=sample_fn,
-                    )
-                    results[key][model_key] = sr
-                    print(f"success_rate={sr:.4f}")
+                    for ts in joint_t_starts:
+                        col_key = f"{model_key}_t{ts}"
+                        print(f"  {col_key}...", end=" ", flush=True)
+                        sr = _eval_condition(
+                            diffusion_model, diffusion_checkpoint_dict,
+                            diffusion_alphas, diffusion_alphas_bar,
+                            env, args.horizon, args.seed, args.n_rollouts, args.t_start,
+                            alpha_s, alpha_a, exec_horizon=args.exec_horizon,
+                            joint_t_start=ts,
+                            joint_model=jm, joint_anchor=ja,
+                            joint_alphas=ja_alphas, joint_alphas_bar=ja_alphas_bar,
+                            joint_norm=ja_norm, joint_horizon=ja_h,
+                            joint_state_dim=ja_s_dim, joint_action_dim=ja_a_dim,
+                            joint_obs_keys=ja_obs_keys,
+                            sample_fn=sample_fn,
+                        )
+                        results[key][col_key] = sr
+                        print(f"success_rate={sr:.4f}")
                 except Exception as e:
-                    print(f"ERROR: {e}")
-                    results[key][model_key] = None
+                    print(f"ERROR loading {model_key}: {e}")
+                    for ts in joint_t_starts:
+                        results[key][f"{model_key}_t{ts}"] = None
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_csv)), exist_ok=True)
     with open(args.output_csv, "w", newline="") as f:
