@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python3 -c ' *)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(chmod +x /home/axs0940/marl_vla/scripts/eval_samdp_sweep_square.sh)",
+      "Bash(/home/axs0940/miniconda3/envs/vla_marl/bin/python training/square/train_diffusion_samdp_square.py --num_epochs 2 --output_dir /tmp/square_samdp_test)"
     ]
   }
 }

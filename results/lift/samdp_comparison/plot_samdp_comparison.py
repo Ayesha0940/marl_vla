@@ -16,8 +16,8 @@ x = np.arange(len(x_labels))
 
 fig, ax = plt.subplots(figsize=(14, 5))
 
-ax.plot(x, quick_eval["BASELINE (diffusion only)"].values, marker="o", label="Vanilla Diffusion", color="tab:blue")
-ax.plot(x, samdp_joint["samdp"].values, marker="s", label="SA-MDP joint (k=3)", color="tab:orange")
+ax.plot(x, quick_eval["BASELINE (diffusion only)"].values, marker="o", label="Diffusion Policy", color="tab:blue")
+ax.plot(x, samdp_joint["samdp"].values, marker="s", label="SA-MDP Regularised Diffusion Policy", color="tab:orange")
 ax.plot(x, quick_eval["baseline_A0"].values, marker="^", label="Joint Denoiser", color="tab:green")
 
 ax.set_xticks(x)

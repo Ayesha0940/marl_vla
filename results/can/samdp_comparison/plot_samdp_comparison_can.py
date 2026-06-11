@@ -50,10 +50,10 @@ x = np.arange(len(x_labels))
 
 fig, ax = plt.subplots(figsize=(14, 5))
 
-ax.plot(x, merged["vanilla"].values,        marker="o", label="Vanilla Diffusion",           color="tab:blue")
-ax.plot(x, merged["samdp_k03"].values,      marker="s", label="SA-MDP joint (k=3)",           color="tab:orange")
-ax.plot(x, merged["samdp_k1"].values,       marker="D", label="SA-MDP joint (k=1)",            color="tab:red")
-ax.plot(x, merged["joint_denoiser"].values, marker="^", label="Joint Denoiser (λ=0.1, A7)",    color="tab:green")
+ax.plot(x, merged["vanilla"].values,        marker="o", label="Diffusion Policy",                          color="tab:blue")
+ax.plot(x, merged["samdp_k03"].values,      marker="s", label="SA-MDP Regularised Diffusion Policy (k=3)",  color="tab:orange")
+ax.plot(x, merged["samdp_k1"].values,       marker="D", label="SA-MDP Regularised Diffusion Policy (k=1)",  color="tab:red")
+ax.plot(x, merged["joint_denoiser"].values, marker="^", label="Joint Denoiser",                              color="tab:green")
 
 ax.set_xticks(x)
 ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=7)

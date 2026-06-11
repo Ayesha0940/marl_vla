@@ -1,0 +1,4 @@
+alpha_s,alpha_a,BASELINE (diffusion only),joint_no_warmstart_a0
+0.000,0.050,0.7600,0.6000
+0.010,0.050,0.4400,0.5600
+0.020,0.050,0.1200,0.1600
