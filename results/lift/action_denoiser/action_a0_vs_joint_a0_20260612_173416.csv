@@ -1,0 +1,4 @@
+model_type,anchor_id,alpha_s,alpha_a,t_start,n_rollouts,success_rate
+baseline,none,0.0,0.0,N/A,50,1.0
+action_denoiser_A0,A0,0.0,0.0,10,50,0.94
+joint_denoiser_A0,A0,0.0,0.0,10,50,0.94
