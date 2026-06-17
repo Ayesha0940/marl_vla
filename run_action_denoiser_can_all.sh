@@ -57,8 +57,8 @@ echo "  Diffusion: $DIFFUSION_CKPT"
 # ── Anchor configs ────────────────────────────────────────────────────────────
 # Format: "ANCHOR:JOINT_CKPT:ACTION_CKPT:RESULTS_CSV"
 declare -a ANCHORS=(
-    "A0:$REPO_ROOT/diffusion_models/ablation_can/joint_all_three_a0.pt:$REPO_ROOT/diffusion_models/action_a0_can.pt:$RESULTS_DIR/action_a0_vs_joint_a0.csv"
-    "A7:$REPO_ROOT/diffusion_models/ablation_can/joint_all_three_a7.pt:$REPO_ROOT/diffusion_models/action_a7_can.pt:$RESULTS_DIR/action_a7_vs_joint_a7.csv"
+    "A0:$REPO_ROOT/diffusion_models/ablation_can/joint_all_three_a0.pt:$REPO_ROOT/diffusion_models/action_a0_can.pt:$RESULTS_DIR/action_a0_vs_joint_a0_aug.csv"
+    "A7:$REPO_ROOT/diffusion_models/ablation_can/joint_all_three_a7.pt:$REPO_ROOT/diffusion_models/action_a7_can.pt:$RESULTS_DIR/action_a7_vs_joint_a7_aug.csv"
 )
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

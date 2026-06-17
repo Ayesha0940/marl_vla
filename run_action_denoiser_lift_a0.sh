@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Action-only denoiser pipeline — Lift task, anchor A0 (no anchor)
+# Action-only denoiser pipeline — Lift task, anchor A7 (object_pose_t0 + proprio)
 #
 # Steps:
-#   1. Train ActionDenoisingUNet1D with A0 (zero anchor embedding)
-#   2. Evaluate: baseline vs. action-denoiser vs. existing joint-denoiser (A0)
+#   1. Train ActionDenoisingUNet1D with A7
+#   2. Evaluate: baseline vs. action-denoiser (A7) vs. existing joint-denoiser (A7)
 #
 # Run from repo root:
 #   bash run_action_denoiser_lift_a0.sh
@@ -19,14 +19,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BC_RNN_CKPT="$REPO_ROOT/checkpoints/bc_rnn_lift/bc_rnn_lift/20260405174006/models/model_epoch_600.pth"
 HDF5_PATH="$REPO_ROOT/datasets/lift/ph/low_dim_v141.hdf5"
 DIFFUSION_CKPT="$REPO_ROOT/checkpoints/lift_diffusion_policy_v5/best_model.pt"
-JOINT_CKPT="$REPO_ROOT/diffusion_models/joint_a0_lift.pt"        # existing A0 joint denoiser for comparison
+JOINT_CKPT="$REPO_ROOT/diffusion_models/ablation/joint_lam01_a0.pt"        # existing A0 joint denoiser for comparison
 ACTION_CKPT="$REPO_ROOT/diffusion_models/action_a0_lift.pt"
 RESULTS_DIR="$REPO_ROOT/results/lift/action_denoiser"
-RESULTS_CSV="$RESULTS_DIR/action_a0_vs_joint_a0.csv"
+RESULTS_CSV="$RESULTS_DIR/action_a0_vs_joint_a0_lam01.csv"
 
 # ── Hyperparameters (override via env) ───────────────────────────────────────
 ANCHOR="${ANCHOR:-A0}"
-EPOCHS="${EPOCHS:-200}"
+EPOCHS="${EPOCHS:-400}"
 BATCH_SIZE="${BATCH_SIZE:-256}"
 LR="${LR:-1e-4}"
 HORIZON="${HORIZON:-16}"
@@ -39,8 +39,8 @@ SEED="${SEED:-0}"
 # Evaluation grid
 N_ROLLOUTS="${N_ROLLOUTS:-30}"
 ALPHA_S_LIST="${ALPHA_S_LIST:-0.0 0.02 0.05}"
-ALPHA_A_LIST="${ALPHA_A_LIST:-0.0 0.3}"
-T_START_LIST="${T_START_LIST:-5 10}"
+ALPHA_A_LIST="${ALPHA_A_LIST:-0.0 0.2 0.3}"
+T_START_LIST="${T_START_LIST:-5}"
 
 mkdir -p "$RESULTS_DIR"
 
@@ -57,14 +57,14 @@ echo "  BC-RNN:    $BC_RNN_CKPT"
 echo "  HDF5:      $HDF5_PATH"
 echo "  Diffusion: $DIFFUSION_CKPT"
 if [[ -f "$JOINT_CKPT" ]]; then
-    echo "  Joint A0:  $JOINT_CKPT  (will be included in eval)"
+    echo "  Joint A7:  $JOINT_CKPT  (will be included in eval)"
 else
-    echo "  Joint A0:  NOT FOUND — eval will compare baseline vs action-denoiser only"
+    echo "  Joint A7:  NOT FOUND — eval will compare baseline vs action-denoiser only"
     JOINT_CKPT=""
 fi
 
-# # ── Step 1: Train action-only denoiser ───────────────────────────────────────
-# log "Step 1: Training action-only denoiser (anchor=${ANCHOR}, epochs=${EPOCHS})"
+# ── Step 1: Train action-only denoiser ───────────────────────────────────────
+log "Step 1: Training action-only denoiser (anchor=${ANCHOR}, epochs=${EPOCHS})"
 
 # cd "$REPO_ROOT"
 # python -m diffusion.train_action_denoiser_lift \
