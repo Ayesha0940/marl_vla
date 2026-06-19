@@ -4,10 +4,12 @@ Train the action-only denoiser for Robomimic Can.
 Reads the demo HDF5 directly via JointDenoiserDataset — no rollout collection needed.
 Obs keys are auto-detected from the BC-RNN checkpoint so state_dim matches eval exactly.
 
-The model denoises action conditioned on the (noise-augmented) state, learning to
-recover clean actions even when the state sensor is slightly corrupted at deployment.
+Two conditioning modes (controlled by --no_state_ctx):
+  Default (conditioned on state):
+    Input:  [noisy_action_t; state_noisy]  — D_a + D_s input channels
+  No condition (--no_state_ctx):
+    Input:  noisy_action_t only            — D_a input channels (state_dim saved as 0)
 
-  Input:  [noisy_action_t; state_noisy]  — D_a + D_s input channels
   Target: eps that recovers clean action  (warm-start separation, default on)
   Loss:   MSE on predicted action noise only
 
@@ -66,6 +68,8 @@ def parse_args():
     p.add_argument("--noise_schedule", type=str, default="uniform",
                    choices=["uniform", "asymmetric"],
                    help="'uniform': alpha_s ~ U[0, max]. 'asymmetric': Beta(3,1) bias. Default: uniform")
+    p.add_argument("--no_state_ctx", action="store_true",
+                   help="Train without state context: input is action only (state_dim=0)")
     p.add_argument("--no_warm_start", action="store_true",
                    help="Disable warm-start: eps target uses noisy x0 instead of clean x0")
     p.add_argument("--gripper_k", type=int, default=5,
@@ -93,7 +97,8 @@ def main():
 
     if args.output_path is None:
         os.makedirs("diffusion_models", exist_ok=True)
-        args.output_path = f"diffusion_models/action_{args.anchor.lower()}_can.pt"
+        suffix = "_nocond" if args.no_state_ctx else ""
+        args.output_path = f"diffusion_models/action_{args.anchor.lower()}{suffix}_can.pt"
 
     # Auto-detect obs_keys from BC-RNN checkpoint
     print(f"\nLoading obs_keys from BC-RNN checkpoint: {args.bc_rnn_ckpt}")
@@ -138,8 +143,9 @@ def main():
     from diffusion.model import make_beta_schedule
 
     channel_sizes = tuple(args.channel_sizes)
+    model_state_dim = 0 if args.no_state_ctx else ds.state_dim
     model = ActionDenoisingUNet1D(
-        state_dim     = ds.state_dim,
+        state_dim     = model_state_dim,
         action_dim    = ds.action_dim,
         anchor_dim    = 128,
         channel_sizes = channel_sizes,
@@ -174,6 +180,8 @@ def main():
     print(f"  aug_alpha_a_max: {args.aug_alpha_a_max}")
     print(f"  noise_schedule:  {args.noise_schedule}")
     print(f"  warm_start_sep:  {not args.no_warm_start}")
+    print(f"  no_state_ctx:    {args.no_state_ctx}")
+    print(f"  model_state_dim: {model_state_dim}")
     print(f"  output:          {args.output_path}\n")
 
     best_loss  = float("inf")
@@ -188,7 +196,11 @@ def main():
         for batch in loader:
             x0_action_clean = batch["action"].to(device)        # (B, H, D_a) clean
             x0_action_noisy = batch["action_noisy"].to(device)  # (B, H, D_a) noise-augmented
-            state_ctx       = batch["state_noisy"].to(device)   # (B, H, D_s) noise-augmented
+            if args.no_state_ctx:
+                B = x0_action_noisy.shape[0]
+                state_ctx = torch.zeros(B, args.horizon, 0, device=device)
+            else:
+                state_ctx = batch["state_noisy"].to(device)     # (B, H, D_s) noise-augmented
 
             _skip = {"state", "action", "state_noisy", "action_noisy"}
             traj  = {k: v.to(device) for k, v in batch.items() if k not in _skip}
@@ -234,7 +246,7 @@ def main():
             "anchor_state_dict": best_state["anchor"],
             # Architecture — used by eval loader to reconstruct model
             "arch":              "action_unet",
-            "state_dim":         ds.state_dim,
+            "state_dim":         model_state_dim,
             "action_dim":        ds.action_dim,
             "horizon":           args.horizon,
             "diffusion_steps":   args.diffusion_steps,
@@ -247,8 +259,8 @@ def main():
             "proprio_dim":       ds.proprio_dim,
             "gripper_k":         args.gripper_k,
             # Normalization
-            "state_mean":        norm["state_mean"],
-            "state_std":         norm["state_std"],
+            "state_mean":        np.zeros(0) if args.no_state_ctx else norm["state_mean"],
+            "state_std":         np.ones(0)  if args.no_state_ctx else norm["state_std"],
             "action_mean":       norm["action_mean"],
             "action_std":        norm["action_std"],
             # Training metadata
@@ -260,7 +272,7 @@ def main():
     )
     print(f"\nSaved: {args.output_path}")
     print(f"  best_loss:  {best_loss:.6f}")
-    print(f"  state_dim:  {ds.state_dim}")
+    print(f"  state_dim:  {model_state_dim}")
     print(f"  action_dim: {ds.action_dim}")
 
 

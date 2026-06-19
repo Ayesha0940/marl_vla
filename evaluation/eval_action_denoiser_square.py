@@ -45,9 +45,9 @@ DEFAULT_ENV_CKPT = os.path.join(
     PROJECT_ROOT,
     "checkpoints",
     "bc_rnn_square",
-    "seed1",
-    "bc_rnn_square_v3_seed1",
-    "20260418035142",
+    "seed3",
+    "bc_rnn_square_v3_seed3",
+    "20260418050524",
     "models",
     "model_epoch_800_NutAssemblySquare_success_0.8.pth",
 )
@@ -392,15 +392,6 @@ def _run_rollout_action_denoiser(
             noisy_chunk = chunk.copy()
         noisy_chunk = np.clip(noisy_chunk, -1.0, 1.0)
 
-        # Build state window from rolling buffer + current obs
-        state_vec   = _flatten_obs(noisy_obs_dict, action_obs_keys)
-        state_list  = list(state_buf) + [state_vec]
-        state_list  = state_list[-action_horizon:]
-        pad         = action_horizon - len(state_list)
-        if pad > 0:
-            state_list = [state_list[0]] * pad + state_list
-        states_win  = np.stack(state_list, axis=0)   # (H, Ds)
-
         # Build action window: pad front with first noisy action if chunk < horizon
         if act_hor < action_horizon:
             a_pad       = action_horizon - act_hor
@@ -408,8 +399,20 @@ def _run_rollout_action_denoiser(
         else:
             actions_win = noisy_chunk                 # (H, Da)
 
+        # Build state context — skipped for no-condition model (action_state_dim=0)
+        if action_state_dim == 0:
+            s_t = torch.zeros(1, action_horizon, 0, device=device)
+        else:
+            state_vec   = _flatten_obs(noisy_obs_dict, action_obs_keys)
+            state_list  = list(state_buf) + [state_vec]
+            state_list  = state_list[-action_horizon:]
+            pad         = action_horizon - len(state_list)
+            if pad > 0:
+                state_list = [state_list[0]] * pad + state_list
+            states_win  = np.stack(state_list, axis=0)   # (H, Ds)
+            s_t = torch.from_numpy((states_win - state_mean_np) / state_std_np).float().unsqueeze(0).to(device)
+
         # Normalize and run denoiser ONCE for the whole chunk
-        s_t = torch.from_numpy((states_win  - state_mean_np) / state_std_np).float().unsqueeze(0).to(device)
         a_t = torch.from_numpy((actions_win - act_mean_np)   / act_std_np).float().unsqueeze(0).to(device)
 
         traj = _build_anchor_dict(obs, noisy_chunk[0], gripper_hist_buf, device)
